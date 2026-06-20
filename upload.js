@@ -24,10 +24,36 @@ const { chromium } = require("playwright");
       }
     );
 
-    await page.waitForTimeout(15000);
+    await page.waitForTimeout(8000);
+
+    console.log("Uploading video...");
+
+    await page.locator('input[type="file"]').setInputFiles("test.mp4");
+
+    console.log("Waiting upload...");
+
+    await page.waitForTimeout(20000);
+
+    console.log("Filling title...");
+
+    await page.locator('input[id="storyboard-selector-title"]').fill(
+      "Test Upload"
+    ).catch(()=>{});
+
+    await page.locator('input[placeholder*="title" i]').fill(
+      "Test Upload"
+    ).catch(()=>{});
+
+    console.log("Filling description...");
+
+    await page.locator('textarea').first().fill(
+      "Testing Pinterest automation."
+    ).catch(()=>{});
+
+    console.log("Taking screenshot...");
 
     await page.screenshot({
-      path: "create-pin.png",
+      path: "upload-test.png",
       fullPage: true
     });
 
@@ -35,7 +61,7 @@ const { chromium } = require("playwright");
 
   } catch (e) {
 
-    console.error("ERROR:", e);
+    console.error(e);
 
     await page.screenshot({
       path: "error.png",
