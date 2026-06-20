@@ -2,7 +2,8 @@ const { chromium } = require("playwright");
 const https = require("https");
 const fs = require("fs");
 
-const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1MrwItyy6IPNLSJbz1b53TGOTS2JBLTyg46Ql9xZpI6w/export?format=csv";
+const SHEET_CSV_URL =
+"https://docs.google.com/spreadsheets/d/1MrwItyy6IPNLSJbz1b53TGOTS2JBLTyg46Ql9xZpI6w/gviz/tq?tqx=out:csv&sheet=PinterestQueue";
 
 function downloadFile(url, path) {
   return new Promise((resolve, reject) => {
