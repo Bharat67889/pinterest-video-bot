@@ -15,19 +15,22 @@ const { chromium } = require("playwright");
       timeout: 60000
     });
 
-    // Thoda load hone do
     await page.waitForTimeout(5000);
 
     console.log("Filling credentials...");
 
-    await page.locator('input[placeholder="Email"]').fill(process.env.PINTEREST_EMAIL);
-    await page.locator('input[placeholder="Password"]').fill(process.env.PINTEREST_PASSWORD);
+    await page.locator('input[placeholder="Enter your email"]').fill(
+      process.env.PINTEREST_EMAIL
+    );
 
-    console.log("Submitting login...");
+    await page.locator('input[placeholder="Enter your password"]').fill(
+      process.env.PINTEREST_PASSWORD
+    );
+
+    console.log("Clicking login...");
 
     await page.click('button[type="submit"]');
 
-    // Login ke baad page settle hone do
     await page.waitForTimeout(15000);
 
     await page.screenshot({
@@ -35,15 +38,17 @@ const { chromium } = require("playwright");
       fullPage: true
     });
 
-    console.log("Login test completed.");
+    console.log("Done.");
 
   } catch (e) {
+
     console.error("ERROR:", e);
 
     await page.screenshot({
       path: "error.png",
       fullPage: true
     });
+
   }
 
   await browser.close();
