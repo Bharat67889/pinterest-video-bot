@@ -1,1 +1,13 @@
 
+{
+  "name": "pinterest-video-bot",
+  "version": "1.0.0",
+  "description": "Pinterest Video Automation",
+  "main": "upload.js",
+  "scripts": {
+    "start": "node upload.js"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}
