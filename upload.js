@@ -2,16 +2,14 @@ const { chromium } = require("playwright");
 const https = require("https");
 const fs = require("fs");
 
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/1MrwItyy6IPNLSJbz1b53TGOTS2JBLTyg46Ql9xZpI6w/edit?usp=sharing";
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1MrwItyy6IPNLSJbz1b53TGOTS2JBLTyg46Ql9xZpI6w/export?format=csv";
 
-async function downloadFile(url, path) {
+function downloadFile(url, path) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(path);
-    https.get(url, (response) => {
-      response.pipe(file);
-      file.on("finish", () => {
-        file.close(resolve);
-      });
+    https.get(url, (res) => {
+      res.pipe(file);
+      file.on("finish", () => file.close(resolve));
     }).on("error", reject);
   });
 }
@@ -28,36 +26,29 @@ async function downloadFile(url, path) {
 
   try {
 
-    console.log("📊 Opening Google Sheet...");
+    console.log("📊 Fetching Sheet CSV...");
 
-    const sheetPage = await context.newPage();
-    await sheetPage.goto(SHEET_URL);
+    const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
 
-    await sheetPage.waitForTimeout(5000);
+    const rows = sheetRaw
+      .split("\n")
+      .map(r => r.split(","));
 
-    // NOTE: simplest approach -> assume sheet already visible
-    const data = await sheetPage.evaluate(() => {
+    let row = null;
 
-      let rows = Array.from(document.querySelectorAll("tr"));
-      let result = [];
+    for (let i = 1; i < rows.length; i++) {
+      const url = rows[i][0];
+      const caption = rows[i][1];
+      const link = rows[i][2];
+      const status = rows[i][3];
 
-      for (let r of rows) {
-        let cols = r.querySelectorAll("td");
-        if (cols.length >= 3) {
-          result.push({
-            url: cols[0]?.innerText,
-            caption: cols[1]?.innerText,
-            link: cols[2]?.innerText
-          });
-        }
+      if (url && status && status.trim() === "PENDING") {
+        row = { url, caption, link };
+        break;
       }
+    }
 
-      return result;
-    });
-
-    let row = data.find(r => r.url && r.url.includes("http"));
-
-    if (!row) throw new Error("No valid row found in sheet");
+    if (!row) throw new Error("No PENDING row found");
 
     console.log("⬇ Downloading MP4...");
 
@@ -71,7 +62,7 @@ async function downloadFile(url, path) {
       timeout: 60000
     });
 
-    await page.waitForTimeout(7000);
+    await page.waitForTimeout(8000);
 
     console.log("Uploading video...");
 
@@ -79,31 +70,34 @@ async function downloadFile(url, path) {
 
     await page.waitForTimeout(15000);
 
-    console.log("Filling title (caption)...");
+    console.log("Setting title (caption)...");
 
     await page.locator('input[placeholder*="title" i]').first()
       .fill(row.caption || "Untitled");
 
-    console.log("Adding link...");
+    console.log("Skipping description (as requested)");
+
+    console.log("Adding Telegram link...");
 
     try {
-      await page.locator('input').fill(row.link || "");
+      await page.locator('input').last().fill(row.link || "");
     } catch {}
 
     console.log("Selecting board...");
 
     try {
+
       await page.locator('div[role="button"]').filter({
         hasText: "Choose a board"
-      }).first().click();
+      }).click();
 
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000);
 
-      await page.locator('text=Trendy283').first().click();
+      await page.locator('text=Trendy283').click();
 
-    } catch {}
-
-    await page.waitForTimeout(3000);
+    } catch (e) {
+      console.log("Board selection skipped");
+    }
 
     console.log("Publishing...");
 
@@ -112,7 +106,7 @@ async function downloadFile(url, path) {
     await page.waitForTimeout(20000);
 
     await page.screenshot({
-      path: "final-success.png",
+      path: "success.png",
       fullPage: true
     });
 
