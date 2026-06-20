@@ -27,9 +27,14 @@ const { chromium } = require("playwright");
     });
 
     console.log("Login test completed.");
-  } catch (e) {
-    console.log(e);
-  }
+ } catch (e) {
+  console.error("ERROR:", e);
+
+  await page.screenshot({
+    path: "error.png",
+    fullPage: true
+  });
+}
 
   await browser.close();
 })();
