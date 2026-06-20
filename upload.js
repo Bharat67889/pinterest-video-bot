@@ -98,7 +98,11 @@ async function clickFirstAvailable(page, selectors) {
     console.log("Waiting after login...");
 
     await page.waitForTimeout(15000);
+await page.context().storageState({
+  path: "state.json"
+});
 
+console.log("Session saved.");
     await page.screenshot({
       path: "pinterest-login.png",
       fullPage: true
