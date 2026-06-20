@@ -11,20 +11,25 @@ const { chromium } = require("playwright");
     console.log("Opening Pinterest...");
 
     await page.goto("https://www.pinterest.com/login/", {
-      waitUntil: "networkidle"
+      waitUntil: "domcontentloaded",
+      timeout: 60000
     });
 
-    // Fill email and password
+    // Thoda load hone do
+    await page.waitForTimeout(5000);
+
+    console.log("Filling credentials...");
+
     await page.locator('input[placeholder="Email"]').fill(process.env.PINTEREST_EMAIL);
     await page.locator('input[placeholder="Password"]').fill(process.env.PINTEREST_PASSWORD);
 
-    // Login button
+    console.log("Submitting login...");
+
     await page.click('button[type="submit"]');
 
-    // Wait for login to complete
+    // Login ke baad page settle hone do
     await page.waitForTimeout(15000);
 
-    // Success screenshot
     await page.screenshot({
       path: "pinterest-login.png",
       fullPage: true
@@ -35,7 +40,6 @@ const { chromium } = require("playwright");
   } catch (e) {
     console.error("ERROR:", e);
 
-    // Error screenshot
     await page.screenshot({
       path: "error.png",
       fullPage: true
