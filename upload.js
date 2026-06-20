@@ -8,9 +8,14 @@ const SHEET_CSV_URL =
 function downloadFile(url, path) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(path);
+
     https.get(url, (res) => {
       res.pipe(file);
-      file.on("finish", () => file.close(resolve));
+
+      file.on("finish", () => {
+        file.close(resolve);
+      });
+
     }).on("error", reject);
   });
 }
@@ -27,7 +32,7 @@ function downloadFile(url, path) {
 
   try {
 
-    console.log("📊 Fetching Sheet CSV...");
+    console.log("📊 Fetching Sheet Data...");
 
     const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
 
@@ -38,18 +43,19 @@ function downloadFile(url, path) {
     let row = null;
 
     for (let i = 1; i < rows.length; i++) {
-      const url = rows[i][0];
-      const caption = rows[i][1];
-      const link = rows[i][2];
-      const status = rows[i][3];
 
-      if (url && status && status.trim() === "PENDING") {
-        row = { url, caption, link };
+      const url = (rows[i][0] || "").trim();
+      const caption = (rows[i][1] || "").trim();
+      const link = (rows[i][2] || "").trim();
+      const status = (rows[i][3] || "").trim().toUpperCase();
+
+      if (url && status === "PENDING") {
+        row = { url, caption, link, index: i };
         break;
       }
     }
 
-    if (!row) throw new Error("No PENDING row found");
+    if (!row) throw new Error("No PENDING row found in PinterestQueue sheet");
 
     console.log("⬇ Downloading MP4...");
 
@@ -73,21 +79,21 @@ function downloadFile(url, path) {
 
     console.log("Setting title (caption)...");
 
-    await page.locator('input[placeholder*="title" i]').first()
-      .fill(row.caption || "Untitled");
-
-    console.log("Skipping description (as requested)");
+    const titleBox = page.locator('input[placeholder*="title" i]').first();
+    await titleBox.fill(row.caption || "Untitled");
 
     console.log("Adding Telegram link...");
 
     try {
-      await page.locator('input').last().fill(row.link || "");
-    } catch {}
+      const inputs = page.locator("input");
+      await inputs.last().fill(row.link || "");
+    } catch (e) {
+      console.log("Link field skipped");
+    }
 
     console.log("Selecting board...");
 
     try {
-
       await page.locator('div[role="button"]').filter({
         hasText: "Choose a board"
       }).click();
