@@ -14,27 +14,33 @@ const { chromium } = require("playwright");
       waitUntil: "networkidle"
     });
 
-    await page.fill('input[type="email"]', process.env.PINTEREST_EMAIL);
-    await page.fill('input[type="password"]', process.env.PINTEREST_PASSWORD);
+    // Fill email and password
+    await page.locator('input[placeholder="Email"]').fill(process.env.PINTEREST_EMAIL);
+    await page.locator('input[placeholder="Password"]').fill(process.env.PINTEREST_PASSWORD);
 
+    // Login button
     await page.click('button[type="submit"]');
 
-    await page.waitForTimeout(10000);
+    // Wait for login to complete
+    await page.waitForTimeout(15000);
 
+    // Success screenshot
     await page.screenshot({
       path: "pinterest-login.png",
       fullPage: true
     });
 
     console.log("Login test completed.");
- } catch (e) {
-  console.error("ERROR:", e);
 
-  await page.screenshot({
-    path: "error.png",
-    fullPage: true
-  });
-}
+  } catch (e) {
+    console.error("ERROR:", e);
+
+    // Error screenshot
+    await page.screenshot({
+      path: "error.png",
+      fullPage: true
+    });
+  }
 
   await browser.close();
 })();
