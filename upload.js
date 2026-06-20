@@ -14,20 +14,20 @@ const { chromium } = require("playwright");
 
   try {
 
-    console.log("Opening Pinterest home...");
+    console.log("Opening Create Pin page...");
 
     await page.goto(
-      "https://www.pinterest.com/",
+      "https://www.pinterest.com/pin-creation-tool/",
       {
         waitUntil: "domcontentloaded",
         timeout: 60000
       }
     );
 
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(15000);
 
     await page.screenshot({
-      path: "home.png",
+      path: "create-pin.png",
       fullPage: true
     });
 
