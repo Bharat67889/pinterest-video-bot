@@ -6,6 +6,7 @@ const { chromium } = require("playwright");
     headless: true
   });
 
+  // saved session use karo
   const context = await browser.newContext({
     storageState: "state.json"
   });
@@ -24,40 +25,59 @@ const { chromium } = require("playwright");
       }
     );
 
-    await page.waitForTimeout(8000);
+    await page.waitForTimeout(5000);
 
     console.log("Uploading video...");
 
-    await page.locator('input[type="file"]').setInputFiles("test.mp4");
+    await page.setInputFiles(
+      'input[type="file"]',
+      "test.mp4"
+    );
 
-    console.log("Waiting upload...");
+    await page.waitForTimeout(15000);
+
+    console.log("Adding title...");
+
+    await page.locator('input[placeholder*="title" i]').first()
+      .fill("Test Upload");
+
+    console.log("Adding description...");
+
+    try {
+      await page.locator('textarea').first()
+        .fill("Uploaded automatically.");
+    } catch (e) {}
+
+    console.log("Selecting board...");
+
+    try {
+
+      await page.locator('div[role="button"]').filter({
+        hasText: "Choose a board"
+      }).first().click();
+
+      await page.waitForTimeout(3000);
+
+      await page.locator('text=Trendy283').first().click();
+
+    } catch (e) {
+      console.log("Board selection skipped");
+    }
+
+    await page.waitForTimeout(5000);
+
+    console.log("Publishing...");
+
+    await page.getByText("Publish").click();
 
     await page.waitForTimeout(20000);
 
-    console.log("Filling title...");
-
-    await page.locator('input[id="storyboard-selector-title"]').fill(
-      "Test Upload"
-    ).catch(()=>{});
-
-    await page.locator('input[placeholder*="title" i]').fill(
-      "Test Upload"
-    ).catch(()=>{});
-
-    console.log("Filling description...");
-
-    await page.locator('textarea').first().fill(
-      "Testing Pinterest automation."
-    ).catch(()=>{});
-
-    console.log("Taking screenshot...");
-
     await page.screenshot({
-      path: "upload-test.png",
+      path: "success.png",
       fullPage: true
     });
 
-    console.log("SUCCESS");
+    console.log("UPLOAD COMPLETE");
 
   } catch (e) {
 
