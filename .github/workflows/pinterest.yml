@@ -19,6 +19,9 @@ jobs:
       - run: npx playwright install
 
       - run: node upload.js
+        env:
+          PINTEREST_EMAIL: ${{ secrets.PINTEREST_EMAIL }}
+          PINTEREST_PASSWORD: ${{ secrets.PINTEREST_PASSWORD }}
 
       - uses: actions/upload-artifact@v4
         with:
