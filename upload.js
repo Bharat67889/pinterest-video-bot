@@ -36,26 +36,45 @@ function downloadFile(url, path) {
 
     const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
 
+    console.log(sheetRaw);
+
     const rows = sheetRaw
+      .trim()
       .split("\n")
-      .map(r => r.split(","));
+      .map(line =>
+        line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g)
+          ?.map(v => v.replace(/^"|"$/g, "").trim())
+      );
+
+    console.log(rows);
 
     let row = null;
 
     for (let i = 1; i < rows.length; i++) {
 
-      const url = (rows[i][0] || "").trim();
-      const caption = (rows[i][1] || "").trim();
-      const link = (rows[i][2] || "").trim();
-      const status = (rows[i][3] || "").trim().toUpperCase();
+      const url = (rows[i]?.[0] || "").trim();
+      const caption = (rows[i]?.[1] || "").trim();
+      const link = (rows[i]?.[2] || "").trim();
+      const status = (rows[i]?.[3] || "")
+        .replace(/\r/g, "")
+        .trim()
+        .toUpperCase();
+
+      console.log("STATUS =", status);
 
       if (url && status === "PENDING") {
-        row = { url, caption, link, index: i };
+        row = {
+          url,
+          caption,
+          link,
+          index: i
+        };
         break;
       }
     }
 
-    if (!row) throw new Error("No PENDING row found in PinterestQueue sheet");
+    if (!row)
+      throw new Error("No PENDING row found in PinterestQueue sheet");
 
     console.log("⬇ Downloading MP4...");
 
@@ -64,10 +83,13 @@ function downloadFile(url, path) {
 
     console.log("Opening Pinterest...");
 
-    await page.goto("https://www.pinterest.com/pin-creation-tool/", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000
-    });
+    await page.goto(
+      "https://www.pinterest.com/pin-creation-tool/",
+      {
+        waitUntil: "domcontentloaded",
+        timeout: 60000
+      }
+    );
 
     await page.waitForTimeout(8000);
 
@@ -77,16 +99,17 @@ function downloadFile(url, path) {
 
     await page.waitForTimeout(15000);
 
-    console.log("Setting title (caption)...");
+    console.log("Setting title...");
 
-    const titleBox = page.locator('input[placeholder*="title" i]').first();
-    await titleBox.fill(row.caption || "Untitled");
+    await page.locator('input[placeholder*="title" i]')
+      .first()
+      .fill(row.caption);
 
     console.log("Adding Telegram link...");
 
     try {
       const inputs = page.locator("input");
-      await inputs.last().fill(row.link || "");
+      await inputs.last().fill(row.link);
     } catch (e) {
       console.log("Link field skipped");
     }
@@ -94,13 +117,14 @@ function downloadFile(url, path) {
     console.log("Selecting board...");
 
     try {
-      await page.locator('div[role="button"]').filter({
-        hasText: "Choose a board"
-      }).click();
+
+      await page.locator('div[role="button"]')
+        .filter({ hasText: "Choose a board" })
+        .click();
 
       await page.waitForTimeout(3000);
 
-      await page.locator('text=Trendy283').click();
+      await page.locator("text=Trendy283").click();
 
     } catch (e) {
       console.log("Board selection skipped");
