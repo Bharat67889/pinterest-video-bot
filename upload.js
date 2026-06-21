@@ -172,7 +172,9 @@ function downloadFile(url, path) {
 
     console.log("Publishing...");
 
-    await page.getByText("Publish").click();
+  await page.locator('button:has-text("Publish")')
+  .first()
+  .click();
 
     await page.waitForTimeout(20000);
 
