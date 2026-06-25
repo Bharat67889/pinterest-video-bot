@@ -103,13 +103,58 @@ function downloadFile(url, path) {
       "video.mp4"
     );
 
-    await page.waitForTimeout(15000);
+    await page.waitForTimeout(25000);
 
-    console.log("Setting title...");
+console.log("Setting title...");
 
-    await page.locator(
-      'input[placeholder*="title" i]'
-    ).first().fill(row.caption);
+const titleSelectors = [
+  'input[placeholder*="title" i]',
+  'textarea[placeholder*="title" i]',
+  '[aria-label*="title" i]',
+  '[data-test-id*="title"]',
+  '[contenteditable="true"]',
+  'input[type="text"]'
+];
+
+let titleFilled = false;
+
+for (const selector of titleSelectors) {
+  try {
+    const box = page.locator(selector).first();
+
+    await box.waitFor({
+      state: "visible",
+      timeout: 5000
+    });
+
+    await box.click();
+
+    try {
+      await box.fill(row.caption);
+    } catch {
+      await box.press("Control+A");
+      await box.type(row.caption);
+    }
+
+    console.log("✅ Title added using:", selector);
+
+    titleFilled = true;
+    break;
+
+  } catch (e) {
+    console.log("❌ Failed selector:", selector);
+  }
+}
+
+if (!titleFilled) {
+
+  await page.screenshot({
+    path: "title_debug.png",
+    fullPage: true
+  });
+
+  throw new Error("Could not find Pinterest title field");
+}
 
     console.log("Adding Telegram link...");
 
@@ -172,9 +217,37 @@ function downloadFile(url, path) {
 
     console.log("Publishing...");
 
-  await page.locator('button:has-text("Publish")')
-  .first()
-  .click();
+  const publishSelectors = [
+  'button:has-text("Publish")',
+  '[data-test-id*="publish"]',
+  'button[type="submit"]'
+];
+
+let published = false;
+
+for (const selector of publishSelectors) {
+  try {
+
+    const btn = page.locator(selector).first();
+
+    await btn.waitFor({
+      state: "visible",
+      timeout: 5000
+    });
+
+    await btn.click();
+
+    console.log("✅ Published using:", selector);
+
+    published = true;
+    break;
+
+  } catch (e) {}
+}
+
+if (!published) {
+  throw new Error("Publish button not found");
+}
 
     await page.waitForTimeout(20000);
 
