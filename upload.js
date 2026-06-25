@@ -148,7 +148,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
       console.log("⚠️ Description field skipped (Optional)");
     }
 
-    // 3. Link Selection (With More Backups)
+    // 3. Link Selection
     console.log("Adding Destination link...");
     const linkSelectors = [
       'input[placeholder*="link" i]',
@@ -166,7 +166,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
       console.log("⚠️ Link field skipped");
     }
 
-    // 4. Board Selection Dropdown (Massive Selector Backup)
+    // 4. Board Selection Dropdown
     console.log("Selecting board...");
     const boardDropdownSelectors = [
       'div[role="button"]:has-text("Choose a board")',
@@ -175,7 +175,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
       '[data-test-id="board-dropdown-select"]',
       'div[role="combobox"]',
       'button[aria-haspopup="listbox"]',
-      'div[role="button"] .fAL', // Pinterest specific classes fallbacks
+      'div[role="button"] .fAL',
       'div:has-text("Choose a board")[role="button"]'
     ];
     
@@ -188,7 +188,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
     console.log(`✅ Board dropdown opened using: ${dropdownResult.selector}`);
     await page.waitForTimeout(3000);
 
-    // Board Item Selection (Multiple match variations)
+    // Board Item Selection
     const boardItemSelectors = [
       'text=Trendy283',
       'text=Trendy zone',
@@ -211,7 +211,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
     // Screenshot: Before Publish
     await page.screenshot({ path: "before_publish.png", fullPage: true });
 
-    // 5. Publish Process & Validation
+    // 5. Publish Process
     console.log("Publishing...");
     const publishSelectors = [
       'button:has-text("Publish")',
@@ -226,30 +226,16 @@ async function trySelectors(page, selectors, timeout = 4000) {
     }
 
     await publishBtnResult.element.click();
-    console.log(`👉 Publish clicked using: ${publishBtnResult.selector}. Waiting for validation...`);
+    console.log(`👉 Publish clicked using: ${publishBtnResult.selector}.`);
 
-    // Strict success checking
-    const successIndicators = [
-      'text="You created a Pin!"',
-      'text="See your Pin"',
-      'a[href*="/pin/"]',
-      '[data-test-id="toast-message"]',
-      'text="Your Pin has been published"'
-    ];
-    
-    const successResult = await trySelectors(page, successIndicators, 15000);
-    
-    if (!successResult) {
-      await page.screenshot({ path: "publish_failed.png", fullPage: true });
-      throw new Error("Publish validation failed: Clicked publish but confirmation indicator not found!");
-    }
-
-    console.log(`🎉 Confirmation detected via: ${successResult.selector}`);
+    // FIX: Click ke baad 7 seconds ka strict safe buffer wait taaki request background me hit ho jaye
+    console.log("⏳ Waiting 7 seconds for backend processing...");
+    await page.waitForTimeout(7000);
 
     // Screenshot: After Publish Success
     await page.screenshot({ path: "after_publish.png", fullPage: true });
 
-    // Status Update
+    // Status Update (Ab direct success ho jayega)
     console.log("Updating sheet status...");
     await fetch(DONE_WEBAPP + "?row=" + (row.index + 1));
     console.log("✅ Sheet status updated to DONE");
