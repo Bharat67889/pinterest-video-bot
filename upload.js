@@ -3,31 +3,38 @@ const https = require("https");
 const fs = require("fs");
 
 const SHEET_CSV_URL =
-"https://docs.google.com/spreadsheets/d/1MrwItyy6IPNLSJbz1b53TGOTS2JBLTyg46Ql9xZpI6w/gviz/tq?tqx=out:csv&sheet=PinterestQueue";
+  "https://docs.google.com/spreadsheets/d/1MrwItyy6IPNLSJbz1b53TGOTS2JBLTyg46Ql9xZpI6w/gviz/tq?tqx=out:csv&sheet=PinterestQueue";
 
 const DONE_WEBAPP =
-"https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
+  "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
 function downloadFile(url, path) {
   return new Promise((resolve, reject) => {
-
     const file = fs.createWriteStream(path);
-
     https.get(url, (res) => {
-
       res.pipe(file);
-
       file.on("finish", () => {
         file.close(resolve);
       });
-
     }).on("error", reject);
-
   });
 }
 
-(async () => {
+// 5. UI changes ke liye Generic Helper Function
+async function trySelectors(page, selectors, timeout = 4000) {
+  for (const selector of selectors) {
+    try {
+      const el = page.locator(selector).first();
+      await el.waitFor({ state: "visible", timeout: timeout });
+      return { element: el, selector: selector };
+    } catch (e) {
+      // Agla selector try karega
+    }
+  }
+  return null;
+}
 
+(async () => {
   const browser = await chromium.launch({
     headless: true
   });
@@ -39,9 +46,7 @@ function downloadFile(url, path) {
   const page = await context.newPage();
 
   try {
-
     console.log("📊 Fetching Sheet Data...");
-
     const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
 
     const rows = sheetRaw
@@ -53,9 +58,7 @@ function downloadFile(url, path) {
       );
 
     let row = null;
-
     for (let i = 1; i < rows.length; i++) {
-
       const url = (rows[i]?.[0] || "").trim();
       const caption = (rows[i]?.[1] || "").trim();
       const link = (rows[i]?.[2] || "").trim();
@@ -65,219 +68,185 @@ function downloadFile(url, path) {
         .toUpperCase();
 
       if (url && status === "PENDING") {
-
-        row = {
-          url,
-          caption,
-          link,
-          index: i
-        };
-
+        row = { url, caption, link, index: i };
         break;
       }
     }
 
-    if (!row)
-      throw new Error("No PENDING row found in PinterestQueue sheet");
+    if (!row) throw new Error("No PENDING row found in PinterestQueue sheet");
 
     console.log("⬇ Downloading MP4...");
-
     await downloadFile(row.url, "video.mp4");
 
     console.log("Opening Pinterest...");
-
-    await page.goto(
-      "https://www.pinterest.com/pin-creation-tool/",
-      {
-        waitUntil: "domcontentloaded",
-        timeout: 60000
-      }
-    );
+    await page.goto("https://www.pinterest.com/pin-creation-tool/", {
+      waitUntil: "domcontentloaded",
+      timeout: 60000
+    });
 
     await page.waitForTimeout(8000);
 
+    // 3. Screenshot: Before Upload
+    await page.screenshot({ path: "before_upload.png", fullPage: true });
+
     console.log("Uploading video...");
+    await page.setInputFiles('input[type="file"]', "video.mp4");
 
-    await page.setInputFiles(
-      'input[type="file"]',
-      "video.mp4"
-    );
-
+    console.log("Waiting for video processing...");
     await page.waitForTimeout(25000);
 
-console.log("Setting title...");
+    // 3. Screenshot: After Upload
+    await page.screenshot({ path: "after_upload.png", fullPage: true });
 
-const titleSelectors = [
-  'input[placeholder*="title" i]',
-  'textarea[placeholder*="title" i]',
-  '[aria-label*="title" i]',
-  '[data-test-id*="title"]',
-  '[contenteditable="true"]',
-  'input[type="text"]'
-];
+    // 1. Title Selectors Array (Using helper)
+    console.log("Setting title...");
+    const titleSelectors = [
+      'input[placeholder*="title" i]',
+      'textarea[placeholder*="title" i]',
+      '[aria-label*="title" i]',
+      '[data-test-id*="title"]',
+      '[contenteditable="true"]',
+      'input[type="text"]'
+    ];
 
-let titleFilled = false;
-
-for (const selector of titleSelectors) {
-  try {
-    const box = page.locator(selector).first();
-
-    await box.waitFor({
-      state: "visible",
-      timeout: 5000
-    });
-
-    await box.click();
+    const titleResult = await trySelectors(page, titleSelectors, 6000);
+    // 4. Fail Fast Validation
+    if (!titleResult) {
+      throw new Error("Publish validation failed: Title field not found");
+    }
 
     try {
-      await box.fill(row.caption);
+      await titleResult.element.click();
+      await titleResult.element.fill(row.caption);
     } catch {
-      await box.press("Control+A");
-      await box.type(row.caption);
+      await titleResult.element.press("Control+A");
+      await titleResult.element.type(row.caption);
+    }
+    console.log(`✅ Title added using: ${titleResult.selector}`);
+
+    // Optional: Description Selectors Integration
+    console.log("Setting description...");
+    const descriptionSelectors = [
+      'textarea[placeholder*="description" i]',
+      '[aria-label*="description" i]',
+      '[data-test-id*="description"]'
+    ];
+    const descResult = await trySelectors(page, descriptionSelectors, 3000);
+    if (descResult) {
+      await descResult.element.fill(row.caption);
+      console.log(`✅ Description added using: ${descResult.selector}`);
+    } else {
+      console.log("⚠️ Description field skipped (Optional)");
     }
 
-    console.log("✅ Title added using:", selector);
-
-    titleFilled = true;
-    break;
-
-  } catch (e) {
-    console.log("❌ Failed selector:", selector);
-  }
-}
-
-if (!titleFilled) {
-
-  await page.screenshot({
-    path: "title_debug.png",
-    fullPage: true
-  });
-
-  throw new Error("Could not find Pinterest title field");
-}
-
-    console.log("Adding Telegram link...");
-
-    try {
-
-      const selectors = [
-        'input[placeholder*="link" i]',
-        'input[placeholder*="destination" i]',
-        'input[placeholder*="website" i]',
-        'input[type="url"]'
-      ];
-
-      let success = false;
-
-      for (const selector of selectors) {
-
-        try {
-
-          const box = page.locator(selector).first();
-
-          await box.waitFor({ timeout: 3000 });
-
-          await box.fill(row.link);
-
-          console.log("Link added using:", selector);
-
-          success = true;
-
-          break;
-
-        } catch (e) {}
-
-      }
-
-      if (!success) {
-        console.log("Link field skipped");
-      }
-
-    } catch (e) {
-      console.log("Link field skipped");
+    // Link field fill
+    console.log("Adding Destination link...");
+    const linkSelectors = [
+      'input[placeholder*="link" i]',
+      'input[placeholder*="destination" i]',
+      'input[placeholder*="website" i]',
+      'input[type="url"]'
+    ];
+    const linkResult = await trySelectors(page, linkSelectors, 3000);
+    if (linkResult) {
+      await linkResult.element.fill(row.link);
+      console.log(`✅ Link added using: ${linkResult.selector}`);
+    } else {
+      console.log("⚠️ Link field skipped");
     }
 
+    // 1. Board Selection with Strict Validation
     console.log("Selecting board...");
+    const boardDropdownSelectors = [
+      'div[role="button"]:has-text("Choose a board")',
+      'button:has-text("Choose a board")',
+      '[data-test-id*="board-picker"]'
+    ];
+    
+    const dropdownResult = await trySelectors(page, boardDropdownSelectors, 5000);
+    // 4. Fail Fast Validation
+    if (!dropdownResult) {
+      throw new Error("Publish validation failed: Board selector dropdown not found");
+    }
+    
+    await dropdownResult.element.click();
+    await page.waitForTimeout(3000);
 
-    try {
+    const boardItemSelectors = [
+      'text=Trendy283',
+      'text=Trendy zone',
+      '[title="Trendy283"]',
+      'div[role="listitem"]:has-text("Trendy283")'
+    ];
+    
+    const boardItemResult = await trySelectors(page, boardItemSelectors, 4000);
+    // 4. Fail Fast Validation
+    if (!boardItemResult) {
+      throw new Error("Publish validation failed: Exact Board name item not found in dropdown");
+    }
+    
+    await boardItemResult.element.click();
+    console.log(`✅ Board selected successfully using: ${boardItemResult.selector}`);
+    await page.waitForTimeout(2000);
 
-      await page.locator('div[role="button"]')
-        .filter({ hasText: "Choose a board" })
-        .click();
+    // 3. Screenshot: Before Publish
+    await page.screenshot({ path: "before_publish.png", fullPage: true });
 
-      await page.waitForTimeout(3000);
+    // 2. Publish Process & Validation
+    console.log("Publishing...");
+    const publishSelectors = [
+      'button:has-text("Publish")',
+      '[data-test-id*="publish"]',
+      'button[type="submit"]'
+    ];
 
-      await page.locator("text=Trendy283").click();
-
-    } catch (e) {
-
-      console.log("Board selection skipped");
-
+    const publishBtnResult = await trySelectors(page, publishSelectors, 5000);
+    if (!publishBtnResult) {
+      throw new Error("Publish validation failed: Publish button not found");
     }
 
-    console.log("Publishing...");
+    // Click the button
+    await publishBtnResult.element.click();
+    console.log(`👉 Publish clicked using: ${publishBtnResult.selector}. Waiting for validation...`);
 
-  const publishSelectors = [
-  'button:has-text("Publish")',
-  '[data-test-id*="publish"]',
-  'button[type="submit"]'
-];
+    // 2. Click ko direct success mat mano -> Check success indicators/confirmation elements
+    const successIndicators = [
+      'text="You created a Pin!"',
+      'text="See your Pin"',
+      'a[href*="/pin/"]',
+      '[data-test-id="toast-message"]'
+    ];
+    
+    // Success confirmation ke liye thoda zyada wait time (15 seconds max)
+    const successResult = await trySelectors(page, successIndicators, 15000);
+    
+    // 4. Fail Fast if no success indicator appears
+    if (!successResult) {
+      await page.screenshot({ path: "publish_failed.png", fullPage: true });
+      throw new Error("Publish validation failed: Clicked publish but confirmation indicator not found!");
+    }
 
-let published = false;
+    console.log(`🎉 Confirmation detected via: ${successResult.selector}`);
 
-for (const selector of publishSelectors) {
-  try {
+    // 3. Screenshot: After Publish Success
+    await page.screenshot({ path: "after_publish.png", fullPage: true });
 
-    const btn = page.locator(selector).first();
-
-    await btn.waitFor({
-      state: "visible",
-      timeout: 5000
-    });
-
-    await btn.click();
-
-    console.log("✅ Published using:", selector);
-
-    published = true;
-    break;
-
-  } catch (e) {}
-}
-
-if (!published) {
-  throw new Error("Publish button not found");
-}
-
-    await page.waitForTimeout(20000);
-
+    // Status tabhi update hoga jab upar ki saari validations pass hongi
     console.log("Updating sheet status...");
-
-    await fetch(
-      DONE_WEBAPP + "?row=" + (row.index + 1)
-    );
-
-    console.log("✅ Sheet status updated");
-
-    await page.screenshot({
-      path: "success.png",
-      fullPage: true
-    });
+    await fetch(DONE_WEBAPP + "?row=" + (row.index + 1));
+    console.log("✅ Sheet status updated to DONE");
 
     console.log("✅ UPLOAD COMPLETE");
 
-  }
-  catch (e) {
-
-    console.error("❌ ERROR:", e);
-
+  } catch (e) {
+    console.error("❌ ERROR EXECUTING WORKFLOW:", e.message);
+    
+    // Final fallback error screenshot
     await page.screenshot({
       path: "error.png",
       fullPage: true
     });
-
+  } finally {
+    await browser.close();
   }
-
-  await browser.close();
-
 })();
