@@ -123,7 +123,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
     }
     console.log(`✅ Title added using: ${titleResult.selector}`);
 
-    // 2. Description Selection (FIXED: Ab yeh div container ke andar exact input/editable target karega)
+    // 2. Description Selection
     console.log("Setting description...");
     const descriptionSelectors = [
       'textarea[placeholder*="description" i]',
@@ -148,15 +148,17 @@ async function trySelectors(page, selectors, timeout = 4000) {
       console.log("⚠️ Description field skipped (Optional)");
     }
 
-    // 3. Link Selection
+    // 3. Link Selection (With More Backups)
     console.log("Adding Destination link...");
     const linkSelectors = [
       'input[placeholder*="link" i]',
       'input[placeholder*="destination" i]',
       'input[placeholder*="website" i]',
-      'input[type="url"]'
+      'input[id*="link" i]',
+      'input[type="url"]',
+      '[data-test-id*="link"] input'
     ];
-    const linkResult = await trySelectors(page, linkSelectors, 3000);
+    const linkResult = await trySelectors(page, linkSelectors, 4000);
     if (linkResult) {
       await linkResult.element.fill(row.link);
       console.log(`✅ Link added using: ${linkResult.selector}`);
@@ -164,27 +166,37 @@ async function trySelectors(page, selectors, timeout = 4000) {
       console.log("⚠️ Link field skipped");
     }
 
-    // 4. Board Selection
+    // 4. Board Selection Dropdown (Massive Selector Backup)
     console.log("Selecting board...");
     const boardDropdownSelectors = [
       'div[role="button"]:has-text("Choose a board")',
       'button:has-text("Choose a board")',
-      '[data-test-id*="board-picker"]'
+      '[data-test-id*="board-picker"]',
+      '[data-test-id="board-dropdown-select"]',
+      'div[role="combobox"]',
+      'button[aria-haspopup="listbox"]',
+      'div[role="button"] .fAL', // Pinterest specific classes fallbacks
+      'div:has-text("Choose a board")[role="button"]'
     ];
     
-    const dropdownResult = await trySelectors(page, boardDropdownSelectors, 5000);
+    const dropdownResult = await trySelectors(page, boardDropdownSelectors, 6000);
     if (!dropdownResult) {
       throw new Error("Publish validation failed: Board selector dropdown not found");
     }
     
     await dropdownResult.element.click();
+    console.log(`✅ Board dropdown opened using: ${dropdownResult.selector}`);
     await page.waitForTimeout(3000);
 
+    // Board Item Selection (Multiple match variations)
     const boardItemSelectors = [
       'text=Trendy283',
       'text=Trendy zone',
       '[title="Trendy283"]',
-      'div[role="listitem"]:has-text("Trendy283")'
+      '[title="Trendy zone"]',
+      'div[role="listitem"]:has-text("Trendy283")',
+      'div[role="option"]:has-text("Trendy283")',
+      'div[role="listitem"]:has-text("Trendy zone")'
     ];
     
     const boardItemResult = await trySelectors(page, boardItemSelectors, 4000);
@@ -204,7 +216,8 @@ async function trySelectors(page, selectors, timeout = 4000) {
     const publishSelectors = [
       'button:has-text("Publish")',
       '[data-test-id*="publish"]',
-      'button[type="submit"]'
+      'button[type="submit"]',
+      'div[role="button"]:has-text("Publish")'
     ];
 
     const publishBtnResult = await trySelectors(page, publishSelectors, 5000);
@@ -220,7 +233,8 @@ async function trySelectors(page, selectors, timeout = 4000) {
       'text="You created a Pin!"',
       'text="See your Pin"',
       'a[href*="/pin/"]',
-      '[data-test-id="toast-message"]'
+      '[data-test-id="toast-message"]',
+      'text="Your Pin has been published"'
     ];
     
     const successResult = await trySelectors(page, successIndicators, 15000);
