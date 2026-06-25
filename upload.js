@@ -20,7 +20,7 @@ function downloadFile(url, path) {
   });
 }
 
-// 5. UI changes ke liye Generic Helper Function
+// UI changes ke liye Generic Helper Function
 async function trySelectors(page, selectors, timeout = 4000) {
   for (const selector of selectors) {
     try {
@@ -86,7 +86,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
 
     await page.waitForTimeout(8000);
 
-    // 3. Screenshot: Before Upload
+    // Screenshot: Before Upload
     await page.screenshot({ path: "before_upload.png", fullPage: true });
 
     console.log("Uploading video...");
@@ -95,10 +95,10 @@ async function trySelectors(page, selectors, timeout = 4000) {
     console.log("Waiting for video processing...");
     await page.waitForTimeout(25000);
 
-    // 3. Screenshot: After Upload
+    // Screenshot: After Upload
     await page.screenshot({ path: "after_upload.png", fullPage: true });
 
-    // 1. Title Selectors Array (Using helper)
+    // 1. Title Selection
     console.log("Setting title...");
     const titleSelectors = [
       'input[placeholder*="title" i]',
@@ -110,7 +110,6 @@ async function trySelectors(page, selectors, timeout = 4000) {
     ];
 
     const titleResult = await trySelectors(page, titleSelectors, 6000);
-    // 4. Fail Fast Validation
     if (!titleResult) {
       throw new Error("Publish validation failed: Title field not found");
     }
@@ -124,22 +123,32 @@ async function trySelectors(page, selectors, timeout = 4000) {
     }
     console.log(`✅ Title added using: ${titleResult.selector}`);
 
-    // Optional: Description Selectors Integration
+    // 2. Description Selection (FIXED: Ab yeh div container ke andar exact input/editable target karega)
     console.log("Setting description...");
     const descriptionSelectors = [
       'textarea[placeholder*="description" i]',
       '[aria-label*="description" i]',
-      '[data-test-id*="description"]'
+      '[data-test-id*="description"] [contenteditable="true"]',
+      '[data-test-id*="description"] textarea',
+      '[data-test-id="pin-draft-description"]',
+      'div[contenteditable="true"]:nth-of-type(2)'
     ];
-    const descResult = await trySelectors(page, descriptionSelectors, 3000);
+    
+    const descResult = await trySelectors(page, descriptionSelectors, 4000);
     if (descResult) {
-      await descResult.element.fill(row.caption);
+      try {
+        await descResult.element.click();
+        await descResult.element.fill(row.caption);
+      } catch {
+        await descResult.element.press("Control+A");
+        await descResult.element.type(row.caption);
+      }
       console.log(`✅ Description added using: ${descResult.selector}`);
     } else {
       console.log("⚠️ Description field skipped (Optional)");
     }
 
-    // Link field fill
+    // 3. Link Selection
     console.log("Adding Destination link...");
     const linkSelectors = [
       'input[placeholder*="link" i]',
@@ -155,7 +164,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
       console.log("⚠️ Link field skipped");
     }
 
-    // 1. Board Selection with Strict Validation
+    // 4. Board Selection
     console.log("Selecting board...");
     const boardDropdownSelectors = [
       'div[role="button"]:has-text("Choose a board")',
@@ -164,7 +173,6 @@ async function trySelectors(page, selectors, timeout = 4000) {
     ];
     
     const dropdownResult = await trySelectors(page, boardDropdownSelectors, 5000);
-    // 4. Fail Fast Validation
     if (!dropdownResult) {
       throw new Error("Publish validation failed: Board selector dropdown not found");
     }
@@ -180,7 +188,6 @@ async function trySelectors(page, selectors, timeout = 4000) {
     ];
     
     const boardItemResult = await trySelectors(page, boardItemSelectors, 4000);
-    // 4. Fail Fast Validation
     if (!boardItemResult) {
       throw new Error("Publish validation failed: Exact Board name item not found in dropdown");
     }
@@ -189,10 +196,10 @@ async function trySelectors(page, selectors, timeout = 4000) {
     console.log(`✅ Board selected successfully using: ${boardItemResult.selector}`);
     await page.waitForTimeout(2000);
 
-    // 3. Screenshot: Before Publish
+    // Screenshot: Before Publish
     await page.screenshot({ path: "before_publish.png", fullPage: true });
 
-    // 2. Publish Process & Validation
+    // 5. Publish Process & Validation
     console.log("Publishing...");
     const publishSelectors = [
       'button:has-text("Publish")',
@@ -205,11 +212,10 @@ async function trySelectors(page, selectors, timeout = 4000) {
       throw new Error("Publish validation failed: Publish button not found");
     }
 
-    // Click the button
     await publishBtnResult.element.click();
     console.log(`👉 Publish clicked using: ${publishBtnResult.selector}. Waiting for validation...`);
 
-    // 2. Click ko direct success mat mano -> Check success indicators/confirmation elements
+    // Strict success checking
     const successIndicators = [
       'text="You created a Pin!"',
       'text="See your Pin"',
@@ -217,10 +223,8 @@ async function trySelectors(page, selectors, timeout = 4000) {
       '[data-test-id="toast-message"]'
     ];
     
-    // Success confirmation ke liye thoda zyada wait time (15 seconds max)
     const successResult = await trySelectors(page, successIndicators, 15000);
     
-    // 4. Fail Fast if no success indicator appears
     if (!successResult) {
       await page.screenshot({ path: "publish_failed.png", fullPage: true });
       throw new Error("Publish validation failed: Clicked publish but confirmation indicator not found!");
@@ -228,10 +232,10 @@ async function trySelectors(page, selectors, timeout = 4000) {
 
     console.log(`🎉 Confirmation detected via: ${successResult.selector}`);
 
-    // 3. Screenshot: After Publish Success
+    // Screenshot: After Publish Success
     await page.screenshot({ path: "after_publish.png", fullPage: true });
 
-    // Status tabhi update hoga jab upar ki saari validations pass hongi
+    // Status Update
     console.log("Updating sheet status...");
     await fetch(DONE_WEBAPP + "?row=" + (row.index + 1));
     console.log("✅ Sheet status updated to DONE");
@@ -241,7 +245,6 @@ async function trySelectors(page, selectors, timeout = 4000) {
   } catch (e) {
     console.error("❌ ERROR EXECUTING WORKFLOW:", e.message);
     
-    // Final fallback error screenshot
     await page.screenshot({
       path: "error.png",
       fullPage: true
