@@ -84,7 +84,8 @@ async function trySelectors(page, selectors, timeout = 4000) {
       timeout: 60000
     });
 
-    await page.waitForTimeout(8000);
+    console.log("⏳ Page loaded. Waiting 10 seconds...");
+    await page.waitForTimeout(10000);
 
     // Screenshot: Before Upload
     await page.screenshot({ path: "before_upload.png", fullPage: true });
@@ -92,8 +93,11 @@ async function trySelectors(page, selectors, timeout = 4000) {
     console.log("Uploading video...");
     await page.setInputFiles('input[type="file"]', "video.mp4");
 
-    console.log("Waiting for video processing...");
+    console.log("Waiting for video processing (25 seconds)...");
     await page.waitForTimeout(25000);
+
+    console.log("⏳ Extra padding. Waiting 10 seconds...");
+    await page.waitForTimeout(10000);
 
     // Screenshot: After Upload
     await page.screenshot({ path: "after_upload.png", fullPage: true });
@@ -122,6 +126,9 @@ async function trySelectors(page, selectors, timeout = 4000) {
       await titleResult.element.type(row.caption);
     }
     console.log(`✅ Title added using: ${titleResult.selector}`);
+    
+    console.log("⏳ Title set. Waiting 10 seconds...");
+    await page.waitForTimeout(10000);
 
     // 2. Description Selection
     console.log("Setting description...");
@@ -148,6 +155,9 @@ async function trySelectors(page, selectors, timeout = 4000) {
       console.log("⚠️ Description field skipped (Optional)");
     }
 
+    console.log("⏳ Description set. Waiting 10 seconds...");
+    await page.waitForTimeout(10000);
+
     // 3. Link Selection
     console.log("Adding Destination link...");
     const linkSelectors = [
@@ -165,6 +175,9 @@ async function trySelectors(page, selectors, timeout = 4000) {
     } else {
       console.log("⚠️ Link field skipped");
     }
+
+    console.log("⏳ Link set. Waiting 10 seconds...");
+    await page.waitForTimeout(10000);
 
     // 4. Board Selection Dropdown
     console.log("Selecting board...");
@@ -186,7 +199,9 @@ async function trySelectors(page, selectors, timeout = 4000) {
     
     await dropdownResult.element.click();
     console.log(`✅ Board dropdown opened using: ${dropdownResult.selector}`);
-    await page.waitForTimeout(3000);
+    
+    console.log("⏳ Dropdown opened. Waiting 10 seconds...");
+    await page.waitForTimeout(10000);
 
     // Board Item Selection
     const boardItemSelectors = [
@@ -206,7 +221,9 @@ async function trySelectors(page, selectors, timeout = 4000) {
     
     await boardItemResult.element.click();
     console.log(`✅ Board selected successfully using: ${boardItemResult.selector}`);
-    await page.waitForTimeout(2000);
+    
+    console.log("⏳ Board selected. Waiting 10 seconds...");
+    await page.waitForTimeout(10000);
 
     // Screenshot: Before Publish
     await page.screenshot({ path: "before_publish.png", fullPage: true });
@@ -228,14 +245,14 @@ async function trySelectors(page, selectors, timeout = 4000) {
     await publishBtnResult.element.click();
     console.log(`👉 Publish clicked using: ${publishBtnResult.selector}.`);
 
-    // FIX: Click ke baad 7 seconds ka strict safe buffer wait taaki request background me hit ho jaye
-    console.log("⏳ Waiting 7 seconds for backend processing...");
-    await page.waitForTimeout(7000);
+    // Modified to 10 seconds as requested for post-publish processing
+    console.log("⏳ Waiting 10 seconds for backend processing...");
+    await page.waitForTimeout(10000);
 
     // Screenshot: After Publish Success
     await page.screenshot({ path: "after_publish.png", fullPage: true });
 
-    // Status Update (Ab direct success ho jayega)
+    // Status Update
     console.log("Updating sheet status...");
     await fetch(DONE_WEBAPP + "?row=" + (row.index + 1));
     console.log("✅ Sheet status updated to DONE");
