@@ -52,11 +52,8 @@ async function trySelectors(page, selectors, timeout = 4000) {
     const rows = sheetRaw
       .trim()
       .split("\n")
-      .map(line =>
-        line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g)
-          ?.map(v => v.replace(/^"|"$/g, "").trim())
-      );
-
+      .map(line => line.match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g)?.map(v => v.replace(/^"|"$/g, "").trim()));
+    
     let row = null;
     for (let i = 1; i < rows.length; i++) {
       const url = (rows[i]?.[0] || "").trim();
@@ -66,98 +63,94 @@ async function trySelectors(page, selectors, timeout = 4000) {
         .replace(/\r/g, "")
         .trim()
         .toUpperCase();
-
+        
       if (url && status === "PENDING") {
         row = { url, caption, link, index: i };
         break;
       }
     }
-
+    
     if (!row) throw new Error("No PENDING row found in PinterestQueue sheet");
-
     console.log("⬇ Downloading MP4...");
     await downloadFile(row.url, "video.mp4");
-
+    
     console.log("Opening Pinterest...");
-    await page.goto("https://www.pinterest.com/pin-creation-tool/", {
-      waitUntil: "domcontentloaded",
-      timeout: 60000
-    });
-
+    await page.goto("https://www.pinterest.com/pin-creation-tool/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    
     console.log("⏳ Page loaded. Waiting 10 seconds...");
     await page.waitForTimeout(10000);
-
+    
     // Screenshot: Before Upload
     await page.screenshot({ path: "before_upload.png", fullPage: true });
-
+    
     console.log("Uploading video...");
     await page.setInputFiles('input[type="file"]', "video.mp4");
-
+    
     console.log("Waiting for video processing (25 seconds)...");
     await page.waitForTimeout(25000);
-
+    
     console.log("⏳ Extra padding. Waiting 10 seconds...");
     await page.waitForTimeout(10000);
-
+    
     // Screenshot: After Upload
     await page.screenshot({ path: "after_upload.png", fullPage: true });
-
-    // 1. Title Selection
+    
+    // 1. Title Selection (Optimized Selectors)
     console.log("Setting title...");
     const titleSelectors = [
+      'input[id="storyboard-selector-title"]', // Pinterest specific ID
       'input[placeholder*="title" i]',
       'textarea[placeholder*="title" i]',
-      '[aria-label*="title" i]',
+      '[data-test-id="pin-draft-title"] input',
       '[data-test-id*="title"]',
-      '[contenteditable="true"]',
       'input[type="text"]'
     ];
-
+    
     const titleResult = await trySelectors(page, titleSelectors, 6000);
     if (!titleResult) {
       throw new Error("Publish validation failed: Title field not found");
     }
-
-    try {
-      await titleResult.element.click();
-      await titleResult.element.fill(row.caption);
-    } catch {
-      await titleResult.element.press("Control+A");
-      await titleResult.element.type(row.caption);
-    }
-    console.log(`✅ Title added using: ${titleResult.selector}`);
     
+    // Focus, Clear and Fill Title properly
+    await titleResult.element.click();
+    // Select all text and clear it to remove any ghost/default text
+    await page.keyboard.press("Control+A");
+    await page.keyboard.press("Backspace");
+    await page.waitForTimeout(500);
+    
+    // Ab fresh text fill karo
+    await titleResult.element.fill(row.caption);
+    
+    console.log(`✅ Title added using: ${titleResult.selector}`);
     console.log("⏳ Title set. Waiting 10 seconds...");
     await page.waitForTimeout(10000);
-
+    
     // 2. Description Selection
     console.log("Setting description...");
     const descriptionSelectors = [
       'textarea[placeholder*="description" i]',
+      '[data-test-id="pin-draft-description"] textarea',
       '[aria-label*="description" i]',
       '[data-test-id*="description"] [contenteditable="true"]',
-      '[data-test-id*="description"] textarea',
-      '[data-test-id="pin-draft-description"]',
       'div[contenteditable="true"]:nth-of-type(2)'
     ];
     
     const descResult = await trySelectors(page, descriptionSelectors, 4000);
     if (descResult) {
-      try {
-        await descResult.element.click();
-        await descResult.element.fill(row.caption);
-      } catch {
-        await descResult.element.press("Control+A");
-        await descResult.element.type(row.caption);
-      }
+      await descResult.element.click();
+      await page.keyboard.press("Control+A");
+      await page.keyboard.press("Backspace");
+      await page.waitForTimeout(500);
+      
+      await descResult.element.fill(row.caption);
       console.log(`✅ Description added using: ${descResult.selector}`);
     } else {
       console.log("⚠️ Description field skipped (Optional)");
     }
-
+    
     console.log("⏳ Description set. Waiting 10 seconds...");
     await page.waitForTimeout(10000);
-
+    
     // 3. Link Selection
     console.log("Adding Destination link...");
     const linkSelectors = [
@@ -168,17 +161,21 @@ async function trySelectors(page, selectors, timeout = 4000) {
       'input[type="url"]',
       '[data-test-id*="link"] input'
     ];
+    
     const linkResult = await trySelectors(page, linkSelectors, 4000);
     if (linkResult) {
+      await linkResult.element.click();
+      await page.keyboard.press("Control+A");
+      await page.keyboard.press("Backspace");
       await linkResult.element.fill(row.link);
       console.log(`✅ Link added using: ${linkResult.selector}`);
     } else {
       console.log("⚠️ Link field skipped");
     }
-
+    
     console.log("⏳ Link set. Waiting 10 seconds...");
     await page.waitForTimeout(10000);
-
+    
     // 4. Board Selection Dropdown
     console.log("Selecting board...");
     const boardDropdownSelectors = [
@@ -196,13 +193,12 @@ async function trySelectors(page, selectors, timeout = 4000) {
     if (!dropdownResult) {
       throw new Error("Publish validation failed: Board selector dropdown not found");
     }
-    
     await dropdownResult.element.click();
     console.log(`✅ Board dropdown opened using: ${dropdownResult.selector}`);
     
     console.log("⏳ Dropdown opened. Waiting 10 seconds...");
     await page.waitForTimeout(10000);
-
+    
     // Board Item Selection
     const boardItemSelectors = [
       'text=Trendy283',
@@ -218,16 +214,15 @@ async function trySelectors(page, selectors, timeout = 4000) {
     if (!boardItemResult) {
       throw new Error("Publish validation failed: Exact Board name item not found in dropdown");
     }
-    
     await boardItemResult.element.click();
     console.log(`✅ Board selected successfully using: ${boardItemResult.selector}`);
     
     console.log("⏳ Board selected. Waiting 10 seconds...");
     await page.waitForTimeout(10000);
-
+    
     // Screenshot: Before Publish
     await page.screenshot({ path: "before_publish.png", fullPage: true });
-
+    
     // 5. Publish Process
     console.log("Publishing...");
     const publishSelectors = [
@@ -236,36 +231,29 @@ async function trySelectors(page, selectors, timeout = 4000) {
       'button[type="submit"]',
       'div[role="button"]:has-text("Publish")'
     ];
-
+    
     const publishBtnResult = await trySelectors(page, publishSelectors, 5000);
     if (!publishBtnResult) {
       throw new Error("Publish validation failed: Publish button not found");
     }
-
     await publishBtnResult.element.click();
     console.log(`👉 Publish clicked using: ${publishBtnResult.selector}.`);
-
-    // Modified to 10 seconds as requested for post-publish processing
+    
     console.log("⏳ Waiting 10 seconds for backend processing...");
     await page.waitForTimeout(10000);
-
+    
     // Screenshot: After Publish Success
     await page.screenshot({ path: "after_publish.png", fullPage: true });
-
+    
     // Status Update
     console.log("Updating sheet status...");
     await fetch(DONE_WEBAPP + "?row=" + (row.index + 1));
     console.log("✅ Sheet status updated to DONE");
-
     console.log("✅ UPLOAD COMPLETE");
-
+    
   } catch (e) {
     console.error("❌ ERROR EXECUTING WORKFLOW:", e.message);
-    
-    await page.screenshot({
-      path: "error.png",
-      fullPage: true
-    });
+    await page.screenshot({ path: "error.png", fullPage: true });
   } finally {
     await browser.close();
   }
