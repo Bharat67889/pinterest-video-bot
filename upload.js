@@ -1,8 +1,6 @@
 const { chromium } = require("playwright");
+const https = require("https");
 const fs = require("fs");
-const { createWriteStream } = require("fs");
-const { pipeline } = require("stream/promises");
-const { execSync } = require("child_process");
 
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/1MrwItyy6IPNLSJbz1b53TGOTS2JBLTyg46Ql9xZpI6w/gviz/tq?tqx=out:csv&sheet=PinterestQueue";
@@ -10,15 +8,16 @@ const SHEET_CSV_URL =
 const DONE_WEBAPP =
   "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
-// Redirects handle karne ke liye modern download function
-async function downloadFile(url, path) {
-  const response = await fetch(url, { redirect: "follow" });
-  if (!response.ok) {
-    throw new Error(`Failed to download video. HTTP Status: ${response.status}`);
-  }
-  const fileStream = createWriteStream(path);
-  // @ts-ignore
-  await pipeline(response.body, fileStream);
+function downloadFile(url, path) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(path);
+    https.get(url, (res) => {
+      res.pipe(file);
+      file.on("finish", () => {
+        file.close(resolve);
+      });
+    }).on("error", reject);
+  });
 }
 
 // UI changes ke liye Generic Helper Function
@@ -72,13 +71,8 @@ async function trySelectors(page, selectors, timeout = 4000) {
     }
     
     if (!row) throw new Error("No PENDING row found in PinterestQueue sheet");
-    
     console.log("⬇ Downloading MP4...");
-    await downloadFile(row.url, "input.mp4");
-    
-    // Video ko Pinterest compatible H.264 format me convert karna
-    console.log("🔄 Re-encoding video to H.264 format...");
-    execSync("ffmpeg -y -i input.mp4 -c:v libx264 -pix_fmt yuv420p -c:a aac converted.mp4");
+    await downloadFile(row.url, "video.mp4");
     
     console.log("Opening Pinterest...");
     await page.goto("https://www.pinterest.com/pin-creation-tool/", { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -89,8 +83,8 @@ async function trySelectors(page, selectors, timeout = 4000) {
     // Screenshot: Before Upload
     await page.screenshot({ path: "before_upload.png", fullPage: true });
     
-    console.log("Uploading converted video...");
-    await page.setInputFiles('input[type="file"]', "converted.mp4");
+    console.log("Uploading video...");
+    await page.setInputFiles('input[type="file"]', "video.mp4");
     
     console.log("Waiting for video processing (25 seconds)...");
     await page.waitForTimeout(25000);
@@ -101,10 +95,10 @@ async function trySelectors(page, selectors, timeout = 4000) {
     // Screenshot: After Upload
     await page.screenshot({ path: "after_upload.png", fullPage: true });
     
-    // 1. Title Selection
+    // 1. Title Selection (Optimized Selectors)
     console.log("Setting title...");
     const titleSelectors = [
-      'input[id="storyboard-selector-title"]',
+      'input[id="storyboard-selector-title"]', // Pinterest specific ID
       'input[placeholder*="title" i]',
       'textarea[placeholder*="title" i]',
       '[data-test-id="pin-draft-title"] input',
@@ -112,21 +106,19 @@ async function trySelectors(page, selectors, timeout = 4000) {
       'input[type="text"]'
     ];
     
-    const titleResult = await trySelectors(page, titleSelectors, 10000);
+    const titleResult = await trySelectors(page, titleSelectors, 6000);
     if (!titleResult) {
-      throw new Error("Publish validation failed: Title field not found or video format error");
+      throw new Error("Publish validation failed: Title field not found");
     }
     
-    // Check if title input is enabled
-    if (await titleResult.element.isDisabled()) {
-      throw new Error("Title input is disabled! Video upload rejected by Pinterest.");
-    }
-    
+    // Focus, Clear and Fill Title properly
     await titleResult.element.click();
+    // Select all text and clear it to remove any ghost/default text
     await page.keyboard.press("Control+A");
     await page.keyboard.press("Backspace");
     await page.waitForTimeout(500);
     
+    // Ab fresh text fill karo
     await titleResult.element.fill(row.caption);
     
     console.log(`✅ Title added using: ${titleResult.selector}`);
