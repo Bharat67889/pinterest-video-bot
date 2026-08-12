@@ -1,7 +1,8 @@
 const { chromium } = require("playwright");
-const https = require("https");
 const fs = require("fs");
-const { execSync } = require("child_process"); // Codec conversion ke liye
+const { createWriteStream } = require("fs");
+const { pipeline } = require("stream/promises");
+const { execSync } = require("child_process");
 
 const SHEET_CSV_URL =
   "https://docs.google.com/spreadsheets/d/1MrwItyy6IPNLSJbz1b53TGOTS2JBLTyg46Ql9xZpI6w/gviz/tq?tqx=out:csv&sheet=PinterestQueue";
@@ -9,16 +10,15 @@ const SHEET_CSV_URL =
 const DONE_WEBAPP =
   "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
-function downloadFile(url, path) {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(path);
-    https.get(url, (res) => {
-      res.pipe(file);
-      file.on("finish", () => {
-        file.close(resolve);
-      });
-    }).on("error", reject);
-  });
+// Redirects handle karne ke liye modern download function
+async function downloadFile(url, path) {
+  const response = await fetch(url, { redirect: "follow" });
+  if (!response.ok) {
+    throw new Error(`Failed to download video. HTTP Status: ${response.status}`);
+  }
+  const fileStream = createWriteStream(path);
+  // @ts-ignore
+  await pipeline(response.body, fileStream);
 }
 
 // UI changes ke liye Generic Helper Function
@@ -72,6 +72,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
     }
     
     if (!row) throw new Error("No PENDING row found in PinterestQueue sheet");
+    
     console.log("⬇ Downloading MP4...");
     await downloadFile(row.url, "input.mp4");
     
@@ -100,7 +101,7 @@ async function trySelectors(page, selectors, timeout = 4000) {
     // Screenshot: After Upload
     await page.screenshot({ path: "after_upload.png", fullPage: true });
     
-    // 1. Title Selection (Optimized Selectors)
+    // 1. Title Selection
     console.log("Setting title...");
     const titleSelectors = [
       'input[id="storyboard-selector-title"]',
