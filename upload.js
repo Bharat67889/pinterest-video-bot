@@ -10,8 +10,9 @@ const SHEET_CSV_URL =
 const DONE_WEBAPP =
   "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
-// Official account Board ID (Trendy zone)
+// Official account Board ID
 const DEFAULT_BOARD_ID = "1112952195354492699";
+const BASE_HOST = "https://in.pinterest.com";
 
 function getAuthFromState() {
   const stateRaw = fs.readFileSync("state.json", "utf-8");
@@ -21,9 +22,10 @@ function getAuthFromState() {
   const csrfToken = csrfCookie ? csrfCookie.value : "";
 
   if (!csrfToken) {
-    throw new Error("state.json me csrftoken cookie nahi mili!");
+    throw new Error("state.json me csrftoken nahi mila!");
   }
 
+  // Saari valid cookies ko string me pack karo
   const cookieStr = state.cookies
     .filter((c) => c.domain.includes("pinterest.com"))
     .map((c) => `\({c.name}=\){c.value}`)
@@ -65,7 +67,7 @@ async function registerMediaUpload(headers) {
   });
 
   const res = await axios.post(
-    "https://www.pinterest.com/resource/ApiResource/create/",
+    `${BASE_HOST}/resource/ApiResource/create/`,
     payload.toString(),
     { headers }
   );
@@ -73,7 +75,7 @@ async function registerMediaUpload(headers) {
   const dataMap = res.data?.resource_response?.data;
   if (!dataMap || !dataMap[clientUUID]) {
     throw new Error(
-      "Failed to register media upload: " + JSON.stringify(res.data)
+      "Failed to register upload: " + JSON.stringify(res.data)
     );
   }
 
@@ -164,7 +166,7 @@ async function createStoryPin(row, uploadId, headers) {
   });
 
   const res = await axios.post(
-    "https://www.pinterest.com/resource/ApiResource/create/",
+    `${BASE_HOST}/resource/ApiResource/create/`,
     payload.toString(),
     { headers }
   );
@@ -183,8 +185,8 @@ async function createStoryPin(row, uploadId, headers) {
       "x-requested-with": "XMLHttpRequest",
       "x-pinterest-appstate": "active",
       "cookie": cookieStr,
-      "origin": "https://www.pinterest.com",
-      "referer": "https://www.pinterest.com/pin-creation-tool/",
+      "origin": "https://in.pinterest.com",
+      "referer": "https://in.pinterest.com/pin-creation-tool/",
       "user-agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     };
