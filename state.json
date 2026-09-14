@@ -21,14 +21,16 @@
       "sameSite": "Strict"
     },
     {
-      "name": "csrftoken",
-      "value": "46a45fc19c98e119d0d5f030bafaf622",
-      "domain": "www.pinterest.com",
-      "path": "/",
-      "expires": 1813529053.930935,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "Lax"
+     
+  "name": "csrftoken",
+  "value": "f18608109998b101d4a149e7a7024d32",
+  "domain": ".pinterest.com",
+  "path": "/",
+  "expires": 1813529053.930935,
+  "httpOnly": false,
+  "secure": true,
+  "sameSite": "Lax"
+
     },
     {
       "name": "_routing_id",
