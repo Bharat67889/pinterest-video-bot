@@ -1,5 +1,6 @@
 const fs = require("fs");
 const https = require("https");
+const crypto = require("crypto");
 const axios = require("axios");
 const FormData = require("form-data");
 
@@ -9,14 +10,24 @@ const SHEET_CSV_URL =
 const DONE_WEBAPP =
   "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
-// Official account ka Board ID (Trendy zone)
-const DEFAULT_BOARD_ID = "1112952195354492699"; 
+// Official account Board ID (Trendy zone)
+const DEFAULT_BOARD_ID = "1112952195354492699";
 
 function getAuthFromState() {
   const stateRaw = fs.readFileSync("state.json", "utf-8");
   const state = JSON.parse(stateRaw);
-  const cookieStr = state.cookies.map((c) => `\({c.name}=\){c.value}`).join("; ");
-  const csrfToken = state.cookies.find((c) => c.name === "csrftoken")?.value || "";
+
+  const csrfCookie = state.cookies.find((c) => c.name === "csrftoken");
+  const csrfToken = csrfCookie ? csrfCookie.value : "";
+
+  if (!csrfToken) {
+    throw new Error("state.json me csrftoken cookie nahi mili!");
+  }
+
+  const cookieStr = state.cookies
+    .filter((c) => c.domain.includes("pinterest.com"))
+    .map((c) => `\({c.name}=\){c.value}`)
+    .join("; ");
 
   return { cookieStr, csrfToken };
 }
@@ -61,7 +72,9 @@ async function registerMediaUpload(headers) {
 
   const dataMap = res.data?.resource_response?.data;
   if (!dataMap || !dataMap[clientUUID]) {
-    throw new Error("Failed to register media upload with Pinterest API");
+    throw new Error(
+      "Failed to register media upload: " + JSON.stringify(res.data)
+    );
   }
 
   return dataMap[clientUUID];
@@ -69,14 +82,12 @@ async function registerMediaUpload(headers) {
 
 async function uploadVideoToS3(uploadData, filePath) {
   const form = new FormData();
-
-  // AWS required keys ko sequence me add karna zaroori hota hai
   const params = uploadData.upload_parameters;
+
   for (const [key, value] of Object.entries(params)) {
     form.append(key, value);
   }
 
-  // Raw file stream append karo
   form.append("file", fs.createReadStream(filePath));
 
   await axios.post(uploadData.upload_url, form, {
@@ -167,12 +178,15 @@ async function createStoryPin(row, uploadId, headers) {
     const { cookieStr, csrfToken } = getAuthFromState();
 
     const headers = {
-      "content-type": "application/x-www-form-urlencoded",
+      "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
       "x-csrftoken": csrfToken,
       "x-requested-with": "XMLHttpRequest",
+      "x-pinterest-appstate": "active",
       "cookie": cookieStr,
+      "origin": "https://www.pinterest.com",
+      "referer": "https://www.pinterest.com/pin-creation-tool/",
       "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     };
 
     console.log("📊 Fetching Google Sheet Data...");
@@ -219,21 +233,24 @@ async function createStoryPin(row, uploadId, headers) {
     await uploadVideoToS3(uploadData, "video.mp4");
     console.log("✅ File streamed to S3 successfully!");
 
-    console.log("⏳ Giving 10 seconds for Pinterest backend transcode...");
+    console.log("⏳ Waiting 10 seconds for backend processing...");
     await new Promise((resolve) => setTimeout(resolve, 10000));
 
     console.log("🚀 Step 3: Publishing Pin to Board...");
     const publishRes = await createStoryPin(row, uploadData.upload_id, headers);
-    console.log("🎉 Pin published successfully:", JSON.stringify(publishRes?.resource_response?.data || "DONE"));
+    console.log(
+      "🎉 Pin published successfully:",
+      JSON.stringify(publishRes?.resource_response?.data || "DONE")
+    );
 
     console.log("📝 Updating sheet status...");
     await fetch(DONE_WEBAPP + "?row=" + (row.index + 1));
     console.log("✅ Sheet status updated to DONE!");
 
-    // Local video cleanup
     if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
   } catch (err) {
     console.error("❌ Process Failed:", err.response?.data || err.message);
+    if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
     process.exit(1);
   }
 })();
