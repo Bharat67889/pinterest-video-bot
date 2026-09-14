@@ -1,0 +1,34 @@
+{
+  "cookies": [
+    {
+      "name": "_b",
+      "value": "\"AZgSUQe+7LpKbIXa/dQXc7sGhh6wB8ovf4jrcfCWyHdXobCpbpN1N2o2I8nKRYvuO0g=\"",
+      "domain": ".pinterest.com",
+      "path": "/"
+    },
+    {
+      "name": "csrftoken",
+      "value": "f18608109998b101d4a149e7a7024d32",
+      "domain": ".pinterest.com",
+      "path": "/"
+    },
+    {
+      "name": "sessionFunnelEventLogged",
+      "value": "1",
+      "domain": ".pinterest.com",
+      "path": "/"
+    },
+    {
+      "name": "g_state",
+      "value": "{\"i_l\":0,\"i_ll\":1789402793067,\"i_b\":\"2OhD4iLOg+4Hua2ynu6sVGtTOrPLV0+YaojlUtvuwJM\",\"i_e\":{\"enable_itp_optimization\":24},\"i_et\":1789402793067}",
+      "domain": ".pinterest.com",
+      "path": "/"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "https://in.pinterest.com",
+      "localStorage": []
+    }
+  ]
+}
