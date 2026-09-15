@@ -10,8 +10,6 @@ const SHEET_CSV_URL =
 const DONE_WEBAPP =
   "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
-// Updated Board ID for Trendy283
-const DEFAULT_BOARD_ID = "1095993396726061324";
 const BASE_HOST = "https://in.pinterest.com";
 
 function getAuthFromState() {
@@ -39,6 +37,52 @@ function downloadFile(url, destPath) {
   });
 }
 
+async function fetchUserBoards(headers) {
+  const payload = new URLSearchParams({
+    source_url: "/pin-creation-tool/",
+    data: JSON.stringify({
+      options: {
+        filter: "all",
+        sort: "alphabetical"
+      },
+      context: {}
+    })
+  });
+
+  const res = await axios.post(
+    `${BASE_HOST}/resource/BoardPickerBoardsResource/get/`,
+    payload.toString(),
+    { headers, validateStatus: () => true }
+  );
+
+  const boards = res.data?.resource_response?.data?.all_boards;
+  if (Array.isArray(boards) && boards.length > 0) {
+    return boards.map((b) => ({ id: b.id, name: b.name }));
+  }
+
+  // Fallback endpoint agar BoardPickerBoardsResource empty de
+  const fallbackPayload = new URLSearchParams({
+    source_url: "/pin-creation-tool/",
+    data: JSON.stringify({
+      options: {},
+      context: {}
+    })
+  });
+
+  const res2 = await axios.post(
+    `${BASE_HOST}/resource/BoardsResource/get/`,
+    fallbackPayload.toString(),
+    { headers, validateStatus: () => true }
+  );
+
+  const boards2 = res2.data?.resource_response?.data;
+  if (Array.isArray(boards2) && boards2.length > 0) {
+    return boards2.map((b) => ({ id: b.id, name: b.name }));
+  }
+
+  throw new Error("Account me koi board nahi mila: " + JSON.stringify(res.data));
+}
+
 async function registerMediaUpload(headers) {
   const clientUUID = crypto.randomUUID();
   const payload = new URLSearchParams({
@@ -59,10 +103,7 @@ async function registerMediaUpload(headers) {
   const res = await axios.post(
     `${BASE_HOST}/resource/ApiResource/create/`,
     payload.toString(),
-    {
-      headers,
-      validateStatus: () => true
-    }
+    { headers, validateStatus: () => true }
   );
 
   if (res.data?.resource_response?.error) {
@@ -88,15 +129,13 @@ async function uploadVideoToS3(uploadData, filePath) {
   form.append("file", fs.createReadStream(filePath));
 
   await axios.post(uploadData.upload_url, form, {
-    headers: {
-      ...form.getHeaders()
-    },
+    headers: { ...form.getHeaders() },
     maxBodyLength: Infinity,
     maxContentLength: Infinity
   });
 }
 
-async function createStoryPin(row, uploadId, headers) {
+async function createStoryPin(row, uploadId, boardId, headers) {
   const storyPinStructure = {
     metadata: {
       pin_title: row.caption,
@@ -142,7 +181,7 @@ async function createStoryPin(row, uploadId, headers) {
         data: {
           alt_text: "",
           allow_shopping_rec: true,
-          board_id: DEFAULT_BOARD_ID,
+          board_id: boardId,
           description: row.caption,
           fields: [
             "pin.id",
@@ -165,15 +204,8 @@ async function createStoryPin(row, uploadId, headers) {
   const res = await axios.post(
     `${BASE_HOST}/resource/ApiResource/create/`,
     payload.toString(),
-    {
-      headers,
-      validateStatus: () => true
-    }
+    { headers, validateStatus: () => true }
   );
-
-  if (res.data?.resource_response?.error) {
-    throw new Error(JSON.stringify(res.data.resource_response.error));
-  }
 
   return res.data;
 }
@@ -204,6 +236,11 @@ async function createStoryPin(row, uploadId, headers) {
       "x-pinterest-source-url": "/pin-creation-tool/",
       "x-requested-with": "XMLHttpRequest"
     };
+
+    console.log("🔍 Fetching all account boards directly from Pinterest...");
+    const availableBoards = await fetchUserBoards(headers);
+    console.log(`📋 Found ${availableBoards.length} boards:`);
+    availableBoards.forEach((b, i) => console.log(`   \({i + 1}. [\){b.name}] (ID: ${b.id})`));
 
     console.log("📊 Fetching Google Sheet Data...");
     const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
@@ -252,12 +289,40 @@ async function createStoryPin(row, uploadId, headers) {
     console.log("⏳ Waiting 10 seconds for Pinterest backend transcode...");
     await new Promise((resolve) => setTimeout(resolve, 10000));
 
-    console.log("🚀 Step 3: Publishing Pin to Board...");
-    const publishRes = await createStoryPin(row, uploadData.upload_id, headers);
-    console.log(
-      "🎉 Pin published successfully:",
-      JSON.stringify(publishRes?.resource_response?.data || "DONE")
+    console.log("🚀 Step 3: Attempting to publish Pin across available boards...");
+    let published = false;
+
+    // Trendy283 board ko pehle priority do agar available ho
+    const trendyIndex = availableBoards.findIndex((b) =>
+      b.name.toLowerCase().includes("trendy")
     );
+    if (trendyIndex > -1) {
+      const [trendyBoard] = availableBoards.splice(trendyIndex, 1);
+      availableBoards.unshift(trendyBoard);
+    }
+
+    for (const board of availableBoards) {
+      try {
+        console.log(`➡️ Trying to publish to board "\({board.name}" (ID:\){board.id})...`);
+        const publishRes = await createStoryPin(row, uploadData.upload_id, board.id, headers);
+
+        if (publishRes?.resource_response?.error) {
+          console.log(`⚠️ Failed on "\({board.name}":\){publishRes.resource_response.error.message || "Unknown error"}`);
+          continue;
+        }
+
+        console.log("🎉 Pin published successfully to board:", board.name);
+        console.log("Data:", JSON.stringify(publishRes?.resource_response?.data || "DONE"));
+        published = true;
+        break;
+      } catch (e) {
+        console.log(`⚠️ Board attempt error on ${board.name}:`, e.message);
+      }
+    }
+
+    if (!published) {
+      throw new Error("Kisi bhi board par publish nahi ho paya!");
+    }
 
     console.log("📝 Updating sheet status...");
     await fetch(DONE_WEBAPP + "?row=" + (row.index + 1));
