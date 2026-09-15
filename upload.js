@@ -41,10 +41,7 @@ async function fetchUserBoards(headers) {
   const payload = new URLSearchParams({
     source_url: "/pin-creation-tool/",
     data: JSON.stringify({
-      options: {
-        filter: "all",
-        sort: "alphabetical"
-      },
+      options: { filter: "all", sort: "alphabetical" },
       context: {}
     })
   });
@@ -60,13 +57,9 @@ async function fetchUserBoards(headers) {
     return boards.map((b) => ({ id: b.id, name: b.name }));
   }
 
-  // Fallback endpoint agar BoardPickerBoardsResource empty de
   const fallbackPayload = new URLSearchParams({
     source_url: "/pin-creation-tool/",
-    data: JSON.stringify({
-      options: {},
-      context: {}
-    })
+    data: JSON.stringify({ options: {}, context: {} })
   });
 
   const res2 = await axios.post(
@@ -80,7 +73,7 @@ async function fetchUserBoards(headers) {
     return boards2.map((b) => ({ id: b.id, name: b.name }));
   }
 
-  throw new Error("Account me koi board nahi mila: " + JSON.stringify(res.data));
+  throw new Error("No boards returned by account.");
 }
 
 async function registerMediaUpload(headers) {
@@ -181,7 +174,7 @@ async function createStoryPin(row, uploadId, boardId, headers) {
         data: {
           alt_text: "",
           allow_shopping_rec: true,
-          board_id: boardId,
+          board_id: String(boardId),
           description: row.caption,
           fields: [
             "pin.id",
@@ -237,10 +230,12 @@ async function createStoryPin(row, uploadId, boardId, headers) {
       "x-requested-with": "XMLHttpRequest"
     };
 
-    console.log("🔍 Fetching all account boards directly from Pinterest...");
+    console.log("🔍 Fetching account boards directly from Pinterest...");
     const availableBoards = await fetchUserBoards(headers);
     console.log(`📋 Found ${availableBoards.length} boards:`);
-    availableBoards.forEach((b, i) => console.log(`   \({i + 1}. [\){b.name}] (ID: ${b.id})`));
+    availableBoards.forEach((b, idx) => {
+      console.log(`   \({idx + 1}. [\){b.name}] (ID: ${b.id})`);
+    });
 
     console.log("📊 Fetching Google Sheet Data...");
     const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
@@ -286,42 +281,33 @@ async function createStoryPin(row, uploadId, boardId, headers) {
     await uploadVideoToS3(uploadData, "video.mp4");
     console.log("✅ File streamed to S3 successfully!");
 
-    console.log("⏳ Waiting 10 seconds for Pinterest backend transcode...");
-    await new Promise((resolve) => setTimeout(resolve, 10000));
+    console.log("⏳ Waiting 15 seconds for Pinterest backend transcode...");
+    await new Promise((resolve) => setTimeout(resolve, 15000));
 
     console.log("🚀 Step 3: Attempting to publish Pin across available boards...");
     let published = false;
 
-    // Trendy283 board ko pehle priority do agar available ho
-    const trendyIndex = availableBoards.findIndex((b) =>
-      b.name.toLowerCase().includes("trendy")
-    );
-    if (trendyIndex > -1) {
-      const [trendyBoard] = availableBoards.splice(trendyIndex, 1);
-      availableBoards.unshift(trendyBoard);
-    }
-
     for (const board of availableBoards) {
-      try {
-        console.log(`➡️ Trying to publish to board "\({board.name}" (ID:\){board.id})...`);
-        const publishRes = await createStoryPin(row, uploadData.upload_id, board.id, headers);
+      console.log(`➡️ Trying board "\({board.name}" (ID:\){board.id})...`);
+      const publishRes = await createStoryPin(row, uploadData.upload_id, board.id, headers);
 
-        if (publishRes?.resource_response?.error) {
-          console.log(`⚠️ Failed on "\({board.name}":\){publishRes.resource_response.error.message || "Unknown error"}`);
-          continue;
-        }
+      if (publishRes?.resource_response?.error) {
+        console.log("⚠️ Board Error:", JSON.stringify(publishRes.resource_response.error));
+        continue;
+      }
 
+      if (publishRes?.resource_response?.data) {
         console.log("🎉 Pin published successfully to board:", board.name);
-        console.log("Data:", JSON.stringify(publishRes?.resource_response?.data || "DONE"));
+        console.log("Data:", JSON.stringify(publishRes.resource_response.data));
         published = true;
         break;
-      } catch (e) {
-        console.log(`⚠️ Board attempt error on ${board.name}:`, e.message);
+      } else {
+        console.log("⚠️ Unexpected payload response:", JSON.stringify(publishRes));
       }
     }
 
     if (!published) {
-      throw new Error("Kisi bhi board par publish nahi ho paya!");
+      throw new Error("Pin kisi bhi board par publish nahi ho paya.");
     }
 
     console.log("📝 Updating sheet status...");
