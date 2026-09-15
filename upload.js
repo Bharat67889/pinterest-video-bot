@@ -115,7 +115,6 @@ async function uploadVideoToS3(uploadData, filePath) {
   const form = new FormData();
   const params = uploadData.upload_parameters;
 
-  // AWS S3 standard multipart key-order: sabse pehle parameters aate hain, fir file
   for (const [key, value] of Object.entries(params)) {
     form.append(key, value);
   }
@@ -139,70 +138,66 @@ async function uploadVideoToS3(uploadData, filePath) {
 }
 
 async function waitForVideoSignature(uploadId, headers) {
-  const maxAttempts = 15;
+  const maxAttempts = 30;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // MediaUploadStatusResource uses options.upload_id
     const payload = new URLSearchParams({
       source_url: "/pin-creation-tool/",
       data: JSON.stringify({
         options: {
-          url: `/v3/media/uploads/${uploadId}/`
+          upload_id: String(uploadId)
         },
         context: {}
       })
     });
 
     const res = await axios.post(
-      `${BASE_HOST}/resource/ApiResource/create/`,
+      `${BASE_HOST}/resource/MediaUploadStatusResource/get/`,
       payload.toString(),
       { headers, validateStatus: () => true }
     );
 
     const raw = res.data?.resource_response?.data;
-    console.log(`⏳ Transcode Poll #${attempt} Raw Data:`, JSON.stringify(raw));
+    const status = raw?.status || raw?.upload_status;
+    const videoSig =
+      raw?.video_signature ||
+      raw?.media_signature ||
+      raw?.signature ||
+      raw?.video_id;
 
-    if (raw) {
-      const sig =
-        raw.video_signature ||
-        raw.media_signature ||
-        raw.signature ||
-        raw.video_id;
-      const status = raw.status || raw.upload_status;
+    console.log(
+      `⏳ Poll #${attempt}: status="${status || "processing"}", sig=${videoSig || "none"}`
+    );
 
-      if (sig) return sig;
-      if (status === "succeeded" && raw.id) return raw.id;
+    if (videoSig) {
+      return {
+        videoSignature: videoSig,
+        imageSignature: raw?.image_signature || ""
+      };
+    }
+
+    if (status === "succeeded") {
+      const fallbackSig = raw?.media_id || raw?.id;
+      if (fallbackSig) {
+        return {
+          videoSignature: fallbackSig,
+          imageSignature: raw?.image_signature || ""
+        };
+      }
+    }
+
+    if (status === "failed") {
+      throw new Error("Transcode failed on Pinterest server.");
     }
 
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
-  console.log("⚠️ Transcode signature auto-detect nahi hua, direct container payload try karenge...");
-  return null;
+  throw new Error("Transcode timed out waiting for signature.");
 }
 
-async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
-  const clipObj = {
-    clip_type: 1,
-    end_time_ms: -1,
-    is_converted_from_image: false,
-    source_media_width: 720,
-    source_media_height: 1280,
-    start_time_ms: -1
-  };
-
-  const blockObj = {
-    block_style: {
-      height: 100,
-      width: 100,
-      x_coord: 0,
-      y_coord: 0
-    },
-    tracking_id: uploadId,
-    type: 3
-  };
-
-  if (videoSignature) {
-    blockObj.video_signature = String(videoSignature);
-  }
+async function createStoryPin(row, uploadId, signatures, boardId, headers) {
+  const { videoSignature, imageSignature } = signatures;
 
   const storyPinStructure = {
     metadata: {
@@ -211,10 +206,34 @@ async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
     },
     pages: [
       {
-        blocks: [blockObj],
-        clips: [clipObj],
+        blocks: [
+          {
+            block_style: {
+              height: 100,
+              width: 100,
+              x_coord: 0,
+              y_coord: 0
+            },
+            tracking_id: uploadId,
+            type: 3,
+            video_signature: String(videoSignature),
+            ...(imageSignature ? { image_signature: imageSignature } : {})
+          }
+        ],
+        clips: [
+          {
+            clip_type: 1,
+            end_time_ms: -1,
+            is_converted_from_image: false,
+            source_media_width: 720,
+            source_media_height: 1280,
+            start_time_ms: -1
+          }
+        ],
         layout: 0,
-        style: { background_color: "#FFFFFF" }
+        style: {
+          background_color: "#FFFFFF"
+        }
       }
     ]
   };
@@ -324,7 +343,7 @@ async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
     await downloadFile(row.url, "video.mp4");
 
     const stat = fs.statSync("video.mp4");
-    console.log(`📦 Video file downloaded successfully: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
+    console.log(`📦 Video downloaded: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
 
     console.log("📡 Step 1: Registering media with Pinterest...");
     const uploadData = await registerMediaUpload(headers);
@@ -334,18 +353,28 @@ async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
     await uploadVideoToS3(uploadData, "video.mp4");
     console.log("✅ File written to S3 successfully!");
 
-    console.log("⏳ Step 2.5: Waiting for transcode completion & real video signature...");
-    const videoSig = await waitForVideoSignature(uploadData.upload_id, headers);
+    console.log("⏳ Step 2.5: Polling MediaUploadStatusResource for video signature...");
+    const signatures = await waitForVideoSignature(uploadData.upload_id, headers);
+    console.log(`✅ Transcode complete! Signature: ${signatures.videoSignature}`);
 
-    console.log("🚀 Step 3: Publishing Pin to Board...");
+    console.log("🚀 Step 3: Publishing Pin across boards...");
     let published = false;
+
+    // Prefer Trendy283 if present
+    const trendyIdx = availableBoards.findIndex((b) =>
+      b.name.toLowerCase().includes("trendy")
+    );
+    if (trendyIdx > -1) {
+      const [trendyBoard] = availableBoards.splice(trendyIdx, 1);
+      availableBoards.unshift(trendyBoard);
+    }
 
     for (const board of availableBoards) {
       console.log(`➡️ Trying board "${board.name}" (ID: ${board.id})...`);
       const publishRes = await createStoryPin(
         row,
         uploadData.upload_id,
-        videoSig,
+        signatures,
         board.id,
         headers
       );
