@@ -1,26 +1,26 @@
 {
   "cookies": [
     {
-      "name": "_b",
-      "value": "\"AZgSUQe+7LpKbIXa/dQXc7sGhh6wB8ovf4jrcfCWyHdXobCpbpN1N2o2I8nKRYvuO0g=\"",
-      "domain": ".pinterest.com",
-      "path": "/"
-    },
-    {
       "name": "csrftoken",
       "value": "f18608109998b101d4a149e7a7024d32",
+      "domain": "in.pinterest.com",
+      "path": "/"
+    },
+    {
+      "name": "_pinterest_sess",
+      "value": "TWc9PSZHY2pvcHdyd3ZyaHhnMVRhUFRtRzlxUUNQWW1RdjhleXg4U1lTY2hEN3ZVMWt6ZlBnNDJGMWhIZmhvR2E5VkR4YnhZT0ptREl5Zk9JcFlyTEpNdllyWUtiUWZ0V1ZaK2dvWjllL21qUmwrS0dxdWpUUzlJM0QzaXFVWXg0clIwTCs3bjloUVVDN0t5N0s2aG44Q2FXR2EvMXppYnJHRndWaFd1YnI3L2gxQUE2eVR1bnFQT1BZKzdCYVp0bi91TnhmaVVmSzRiektleGNLd2FzdVRNKzkxazNuZzNVaUwxODlZOHlvUmduSCsyREVYUUhrcWNCdUZEb3B1NUJRQ2hiUkIweVJMK0J6WUh6YXYvWXlqVDNaM01oRjhxd0dmT3dPZ3ByWEZieG5ESWdiaFoyWUlLMWJ4aGxIRTdMRnpVR2lpWlM2SE5KSXlmQ2RzOTNHOXhXYmkyN21LUERMMVhpNDR6R2h1TzllVTY3OUxDdDQrcGYzS0JjMnJZNDZxNkZMT0xOS3p1YzRCa3RrWU5tNlVXaWl1cmk5cWM0ZGpQdW5wRTVPMWRGaFdQZEZsdVprdFRrRGdHdEdDNXV6WTFjcW9RbnVxR295MC90ZXRQc0pQRzB6cENwKzJYcUZhV1NTSVNzcVRUWStqUk84ZHo1TC9YWU9mV1dHZTRGWndLQldBMzdybHBxYytLL01JTEVKT1gvdCtWSjJnSGorUWJtUk02YW9IbDU4eWltek5jbTlEOWxtRDBYTjZ0WGV4alZQam9XY2FaR2NCQ1BiMXBrUGhick5aSys4bU11eGhLWFE3TDhyUHNQK2VtNDFMWFdXVzdpZTVoRk8zSkdhdG1EdFJodWcwTythbisrdHFQUTRNR2NSWG1uQXlOTjFVeWM0bXBZVTFvUU95eDVxTnJlMGZrcTZTNG8wVkNSd2ozSjQ5WXFjZWhqY1NRcThyT3VxVkhHTFN1YWNVTmEycGRUMUR5Z1MxWC82YUxHanVDdktFdjc0ZFF0UTdFT3pQUE9zNUpvUzVTZmNISmNRRFcrWEdyenVRNXpzbDQ4U0w2UVlhVXRoNmpUUWRpM05IWnNKd0ZxWjJDNlhPalVyYnd5VkhpZGVJc3NENnRObWV3VE5DdGRSR2pkSXFDZXpjZmlzYTNLTGE0TFBuMjc2MGxXelVOVmVHc0kzeW83MCtKRjJ0ME5xMjZmY29nUzRna21lYTl1V0R4WVNDaGRvT2F5cFpyaUcwVEh4Qk1qU2d3Z1VGYkN6M0VlOEdicjhuVGdDT3hSSnJISW10NkNtS1FYclJoWXY3dHlobnBDWTNHRGFVRENSQWFiMzhOV0t2bzF2bDdBeG9JSG1ENlhkeEJpN2Jhd0t3UnF6dkl2RjZXRDlTVDdDMmY5dnFEVTRQVDhLaUh2SWNuWXZJS01UU09UYkhrWExOVVFNeUM3U2wwMkpHb0wvYzNmdGF6RVNCR0w5a3BycDEzVGRVQVhvNmI1SkFMdjZrdWJmek5YV1k5dGVtaVVEeTVHZEE0YzBuRkRjcms1Mi8vY0o5Rm80QUtpZlo3dXVsVzVRMXI3czFpL3QzdVpTczU1Zkh4OTFGNEZuY2VLanAyQklwM2F6c2dSbm5UeVkwNzhTcUo0RGwxbWdNQlEvTmpFZDJxOTBheG9UUml0M0hObE14WXhIcWw1d0xScU5xaHUxckZBTVZPQ3ZTTm5uK0FoVzdTRHpNODdVUmh2VUxWV2N4aWpxV0tOdm1BMkpoN0I3cWlMTWpmZllyR00rOFd6V0FkMDFmdG0mYmNodUl6RGYxdUEwcTY3RWJTS2hGa2EzMWE4PQ==",
       "domain": ".pinterest.com",
       "path": "/"
     },
     {
-      "name": "sessionFunnelEventLogged",
+      "name": "_auth",
       "value": "1",
       "domain": ".pinterest.com",
       "path": "/"
     },
     {
-      "name": "g_state",
-      "value": "{\"i_l\":0,\"i_ll\":1789402793067,\"i_b\":\"2OhD4iLOg+4Hua2ynu6sVGtTOrPLV0+YaojlUtvuwJM\",\"i_e\":{\"enable_itp_optimization\":24},\"i_et\":1789402793067}",
+      "name": "_b",
+      "value": "\"AZgSUQe+7LpKbIXa/dQXc7sGhh6wB8ovf4jrcfCWyHdXobCpbpN1N2o2I8nKRYvuO0g=\"",
       "domain": ".pinterest.com",
       "path": "/"
     }
