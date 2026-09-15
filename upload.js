@@ -21,14 +21,17 @@ function getAuthFromState() {
   };
 }
 
-// Redirects follow karne wala proper downloader
 async function downloadFile(url, destPath) {
   const writer = fs.createWriteStream(destPath);
   const response = await axios({
     url,
     method: "GET",
     responseType: "stream",
-    maxRedirects: 10
+    maxRedirects: 10,
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
   });
 
   response.data.pipe(writer);
@@ -309,46 +312,47 @@ async function createStoryPin(row, uploadId, signatures, boardId, headers) {
 
     console.log("📊 Fetching Google Sheet Data...");
     const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
-    const rows = sheetRaw
-      .trim()
-      .split("\n")
-      .map((line) =>
-        line
-          .match(/(".*?"|[^",]+)(?=\s*,|\s*$)/g)
-          ?.map((v) => v.replace(/^"|"$/g, "").trim())
-      );
 
-    let row = null;
-    for (let i = 1; i < rows.length; i++) {
-      const url = (rows[i]?.[0] || "").trim();
-      const caption = (rows[i]?.[1] || "").trim();
-      const link = (rows[i]?.[2] || "").trim();
-      const status = (rows[i]?.[3] || "")
-        .replace(/\r/g, "")
-        .trim()
-        .toUpperCase();
+    const lines = sheetRaw.trim().split("\n");
+    let chosenRow = null;
 
-      if (url && status === "PENDING") {
-        row = { url, caption, link, index: i };
-        break;
+    for (let i = 1; i < lines.length; i++) {
+      const match = lines[i].match(/(".*?"|[^",\r\n]+)(?=\s*,|\s*$)/g);
+      if (!match) continue;
+      const clean = match.map((v) => v.replace(/^"|"$/g, "").trim());
+
+      const url = clean[0] || "";
+      const caption = clean[1] || "";
+      const link = clean[2] || "";
+      const status = (clean[3] || "").toUpperCase();
+
+      if (url.startsWith("http") && status === "PENDING") {
+        console.log(`🎯 Testing Row ${i + 1}: ${url}`);
+        try {
+          if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
+          console.log("⬇️ Downloading MP4...");
+          await downloadFile(url, "video.mp4");
+
+          const stat = fs.statSync("video.mp4");
+          if (stat.size > 10000) {
+            console.log(`📦 Video downloaded successfully: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
+            chosenRow = { url, caption, link, index: i };
+            break;
+          } else {
+            console.log("⚠️ File is empty or too small, skipping row...");
+          }
+        } catch (e) {
+          console.log(`⚠️ Download failed for row ${i + 1} (${e.message}), skipping...`);
+        }
       }
     }
 
-    if (!row) {
-      console.log("ℹ️ No PENDING row found. Exiting.");
+    if (!chosenRow) {
+      console.log("ℹ️ No valid PENDING task with downloadable MP4 found.");
       return;
     }
 
-    console.log(`🎯 Found Pending Task (Row ${row.index + 1}): "${row.caption}"`);
-    console.log("⬇️ Downloading MP4...");
-    await downloadFile(row.url, "video.mp4");
-
-    const stat = fs.statSync("video.mp4");
-    console.log(`📦 Video downloaded: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
-
-    if (stat.size === 0) {
-      throw new Error("Downloaded video file is empty (0 MB)! Video URL verify karo.");
-    }
+    console.log(`🚀 Processing Task (Row ${chosenRow.index + 1}): "${chosenRow.caption}"`);
 
     console.log("📡 Step 1: Registering media with Pinterest...");
     const uploadData = await registerMediaUpload(headers);
@@ -376,7 +380,7 @@ async function createStoryPin(row, uploadId, signatures, boardId, headers) {
     for (const board of availableBoards) {
       console.log(`➡️ Trying board "${board.name}" (ID: ${board.id})...`);
       const publishRes = await createStoryPin(
-        row,
+        chosenRow,
         uploadData.upload_id,
         signatures,
         board.id,
@@ -396,8 +400,6 @@ async function createStoryPin(row, uploadId, signatures, boardId, headers) {
         console.log("Data:", JSON.stringify(publishRes.resource_response.data));
         published = true;
         break;
-      } else {
-        console.log("⚠️ Unexpected response:", JSON.stringify(publishRes));
       }
     }
 
@@ -406,7 +408,7 @@ async function createStoryPin(row, uploadId, signatures, boardId, headers) {
     }
 
     console.log("📝 Updating sheet status...");
-    await fetch(DONE_WEBAPP + "?row=" + (row.index + 1));
+    await fetch(DONE_WEBAPP + "?row=" + (chosenRow.index + 1));
     console.log("✅ Sheet status updated to DONE!");
 
     if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
