@@ -73,7 +73,7 @@ async function fetchUserBoards(headers) {
     return boards2.map((b) => ({ id: b.id, name: b.name }));
   }
 
-  throw new Error("No boards returned by account.");
+  throw new Error("No boards found for account.");
 }
 
 async function registerMediaUpload(headers) {
@@ -129,13 +129,14 @@ async function uploadVideoToS3(uploadData, filePath) {
 }
 
 async function waitForVideoSignature(uploadId, headers) {
-  const maxAttempts = 20;
+  const maxAttempts = 30;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // Correct internal Pinterest upload check resource
     const payload = new URLSearchParams({
       source_url: "/pin-creation-tool/",
       data: JSON.stringify({
         options: {
-          url: `/v3/media/uploads/${uploadId}/status/`
+          url: `/v3/media/uploads/${uploadId}/`
         },
         context: {}
       })
@@ -147,26 +148,30 @@ async function waitForVideoSignature(uploadId, headers) {
       { headers, validateStatus: () => true }
     );
 
-    const statusData = res.data?.resource_response?.data;
-    const status = statusData?.status;
-    const sig = statusData?.video_signature || statusData?.media_signature || statusData?.signature;
+    const resData = res.data?.resource_response?.data || {};
+    const status = resData.status || resData.upload_status;
+    const videoSig =
+      resData.video_signature ||
+      resData.signature ||
+      resData.media_signature ||
+      resData.media_id;
 
-    console.log(`⏳ Transcode Poll #\({attempt}: status = "\){status || "unknown"}", signature = ${sig || "none"}`);
+    console.log(
+      `⏳ Transcode Poll #\({attempt}: status = "\){status || "processing"}", signature = ${videoSig || "pending"}`
+    );
 
-    if (sig) {
-      return sig;
+    if (videoSig && status === "succeeded") {
+      return videoSig;
     }
 
-    if (status === "registered" || status === "processing") {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      continue;
+    if (status === "failed") {
+      throw new Error("Pinterest video transcode failed on backend!");
     }
 
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
-  // Fallback signature agar status API signature direct na de
-  return String(uploadId);
+  throw new Error("Video transcode timed out waiting for valid video_signature.");
 }
 
 async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
@@ -320,19 +325,28 @@ async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
     await uploadVideoToS3(uploadData, "video.mp4");
     console.log("✅ File streamed to S3 successfully!");
 
-    console.log("⏳ Step 2.5: Waiting for video transcode and retrieving video signature...");
+    console.log("⏳ Step 2.5: Waiting for transcode completion & real video signature...");
     const videoSig = await waitForVideoSignature(uploadData.upload_id, headers);
-    console.log(`✅ Received video_signature: ${videoSig}`);
+    console.log(`✅ Transcode complete! Valid video_signature: ${videoSig}`);
 
-    console.log("🚀 Step 3: Attempting to publish Pin across available boards...");
+    console.log("🚀 Step 3: Publishing Pin to Board...");
     let published = false;
 
     for (const board of availableBoards) {
       console.log(`➡️ Trying board "\({board.name}" (ID:\){board.id})...`);
-      const publishRes = await createStoryPin(row, uploadData.upload_id, videoSig, board.id, headers);
+      const publishRes = await createStoryPin(
+        row,
+        uploadData.upload_id,
+        videoSig,
+        board.id,
+        headers
+      );
 
       if (publishRes?.resource_response?.error) {
-        console.log("⚠️ Board Error:", JSON.stringify(publishRes.resource_response.error));
+        console.log(
+          "⚠️ Board Error:",
+          JSON.stringify(publishRes.resource_response.error)
+        );
         continue;
       }
 
@@ -342,7 +356,7 @@ async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
         published = true;
         break;
       } else {
-        console.log("⚠️ Unexpected payload response:", JSON.stringify(publishRes));
+        console.log("⚠️ Unexpected response:", JSON.stringify(publishRes));
       }
     }
 
