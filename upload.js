@@ -56,7 +56,7 @@ async function registerMediaUpload(headers) {
   });
 
   const res = await axios.post(
-    `${BASE_HOST}/resource/ApiSResource/create/`,
+    `${BASE_HOST}/resource/ApiResource/create/`,
     payload.toString(),
     {
       headers,
@@ -160,7 +160,7 @@ async function createStoryPin(row, uploadId, headers) {
   });
 
   const res = await axios.post(
-    `${BASE_HOST}/resource/ApiSResource/create/`,
+    `${BASE_HOST}/resource/ApiResource/create/`,
     payload.toString(),
     {
       headers,
