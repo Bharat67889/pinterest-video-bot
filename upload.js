@@ -10,7 +10,8 @@ const SHEET_CSV_URL =
 const DONE_WEBAPP =
   "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
-const DEFAULT_BOARD_ID = "1112952195354492699";
+// Updated Board ID for Trendy283
+const DEFAULT_BOARD_ID = "1095993396726061324";
 const BASE_HOST = "https://in.pinterest.com";
 
 function getAuthFromState() {
