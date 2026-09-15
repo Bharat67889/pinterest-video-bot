@@ -10,7 +10,6 @@ const SHEET_CSV_URL =
 const DONE_WEBAPP =
   "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
-// Official account Board ID
 const DEFAULT_BOARD_ID = "1112952195354492699";
 const BASE_HOST = "https://in.pinterest.com";
 
@@ -18,18 +17,10 @@ function getAuthFromState() {
   const stateRaw = fs.readFileSync("state.json", "utf-8");
   const state = JSON.parse(stateRaw);
 
-  const csrfCookie = state.cookies.find((c) => c.name === "csrftoken");
-  const csrfToken = csrfCookie ? csrfCookie.value : "";
-
-  if (!csrfToken) {
-    throw new Error("state.json me csrftoken nahi mila!");
-  }
-
-  const cookieStr = state.cookies
-    .map((c) => `\({c.name}=\){c.value}`)
-    .join("; ");
-
-  return { cookieStr, csrfToken };
+  return {
+    cookieStr: state.cookieStr,
+    csrfToken: state.csrfToken
+  };
 }
 
 function downloadFile(url, destPath) {
@@ -65,7 +56,7 @@ async function registerMediaUpload(headers) {
   });
 
   const res = await axios.post(
-    `${BASE_HOST}/resource/ApiResource/create/`,
+    `${BASE_HOST}/resource/ApiSResource/create/`,
     payload.toString(),
     {
       headers,
@@ -79,9 +70,7 @@ async function registerMediaUpload(headers) {
 
   const dataMap = res.data?.resource_response?.data;
   if (!dataMap || !dataMap[clientUUID]) {
-    throw new Error(
-      "Failed to register media: " + JSON.stringify(res.data)
-    );
+    throw new Error("Failed to register media: " + JSON.stringify(res.data));
   }
 
   return dataMap[clientUUID];
@@ -171,7 +160,7 @@ async function createStoryPin(row, uploadId, headers) {
   });
 
   const res = await axios.post(
-    `${BASE_HOST}/resource/ApiResource/create/`,
+    `${BASE_HOST}/resource/ApiSResource/create/`,
     payload.toString(),
     {
       headers,
@@ -188,20 +177,29 @@ async function createStoryPin(row, uploadId, headers) {
 
 (async () => {
   try {
-    console.log("🔑 Reading fresh session credentials from state.json...");
+    console.log("🔑 Reading session credentials from state.json...");
     const { cookieStr, csrfToken } = getAuthFromState();
 
     const headers = {
       "accept": "application/json, text/javascript, */*, q=0.01",
-      "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-      "x-csrftoken": csrfToken,
-      "x-requested-with": "XMLHttpRequest",
-      "x-pinterest-appstate": "active",
+      "accept-language": "en-US,en;q=0.9",
+      "content-type": "application/x-www-form-urlencoded",
       "cookie": cookieStr,
       "origin": "https://in.pinterest.com",
       "referer": "https://in.pinterest.com/pin-creation-tool/",
+      "sec-ch-ua": '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"',
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": '"Windows"',
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-origin",
       "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
+      "x-app-version": "a73904a",
+      "x-csrftoken": csrfToken,
+      "x-pinterest-appstate": "active",
+      "x-pinterest-source-url": "/pin-creation-tool/",
+      "x-requested-with": "XMLHttpRequest"
     };
 
     console.log("📊 Fetching Google Sheet Data...");
@@ -248,7 +246,7 @@ async function createStoryPin(row, uploadId, headers) {
     await uploadVideoToS3(uploadData, "video.mp4");
     console.log("✅ File streamed to S3 successfully!");
 
-    console.log("⏳ Waiting 10 seconds for backend processing...");
+    console.log("⏳ Waiting 10 seconds for Pinterest backend transcode...");
     await new Promise((resolve) => setTimeout(resolve, 10000));
 
     console.log("🚀 Step 3: Publishing Pin to Board...");
