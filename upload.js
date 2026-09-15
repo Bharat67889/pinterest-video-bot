@@ -1,5 +1,4 @@
 const fs = require("fs");
-const https = require("https");
 const crypto = require("crypto");
 const axios = require("axios");
 const FormData = require("form-data");
@@ -22,18 +21,21 @@ function getAuthFromState() {
   };
 }
 
-function downloadFile(url, destPath) {
+// Redirects follow karne wala proper downloader
+async function downloadFile(url, destPath) {
+  const writer = fs.createWriteStream(destPath);
+  const response = await axios({
+    url,
+    method: "GET",
+    responseType: "stream",
+    maxRedirects: 10
+  });
+
+  response.data.pipe(writer);
+
   return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(destPath);
-    https
-      .get(url, (res) => {
-        res.pipe(file);
-        file.on("finish", () => file.close(resolve));
-      })
-      .on("error", (err) => {
-        fs.unlink(destPath, () => {});
-        reject(err);
-      });
+    writer.on("finish", resolve);
+    writer.on("error", reject);
   });
 }
 
@@ -140,7 +142,6 @@ async function uploadVideoToS3(uploadData, filePath) {
 async function waitForVideoSignature(uploadId, headers) {
   const maxAttempts = 30;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    // MediaUploadStatusResource uses options.upload_id
     const payload = new URLSearchParams({
       source_url: "/pin-creation-tool/",
       data: JSON.stringify({
@@ -345,6 +346,10 @@ async function createStoryPin(row, uploadId, signatures, boardId, headers) {
     const stat = fs.statSync("video.mp4");
     console.log(`📦 Video downloaded: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
 
+    if (stat.size === 0) {
+      throw new Error("Downloaded video file is empty (0 MB)! Video URL verify karo.");
+    }
+
     console.log("📡 Step 1: Registering media with Pinterest...");
     const uploadData = await registerMediaUpload(headers);
     console.log(`✅ Upload registered! Upload ID: ${uploadData.upload_id}`);
@@ -360,7 +365,6 @@ async function createStoryPin(row, uploadId, signatures, boardId, headers) {
     console.log("🚀 Step 3: Publishing Pin across boards...");
     let published = false;
 
-    // Prefer Trendy283 if present
     const trendyIdx = availableBoards.findIndex((b) =>
       b.name.toLowerCase().includes("trendy")
     );
