@@ -115,23 +115,32 @@ async function uploadVideoToS3(uploadData, filePath) {
   const form = new FormData();
   const params = uploadData.upload_parameters;
 
+  // AWS S3 standard multipart key-order: sabse pehle parameters aate hain, fir file
   for (const [key, value] of Object.entries(params)) {
     form.append(key, value);
   }
 
-  form.append("file", fs.createReadStream(filePath));
+  const fileBuffer = fs.readFileSync(filePath);
+  form.append("file", fileBuffer, {
+    filename: "video.mp4",
+    contentType: "video/mp4"
+  });
 
-  await axios.post(uploadData.upload_url, form, {
+  const s3Res = await axios.post(uploadData.upload_url, form, {
     headers: { ...form.getHeaders() },
     maxBodyLength: Infinity,
-    maxContentLength: Infinity
+    maxContentLength: Infinity,
+    validateStatus: () => true
   });
+
+  if (s3Res.status >= 400) {
+    throw new Error(`S3 Upload failed with status ${s3Res.status}: ${s3Res.data}`);
+  }
 }
 
 async function waitForVideoSignature(uploadId, headers) {
-  const maxAttempts = 30;
+  const maxAttempts = 15;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    // Correct internal Pinterest upload check resource
     const payload = new URLSearchParams({
       source_url: "/pin-creation-tool/",
       data: JSON.stringify({
@@ -148,33 +157,53 @@ async function waitForVideoSignature(uploadId, headers) {
       { headers, validateStatus: () => true }
     );
 
-    const resData = res.data?.resource_response?.data || {};
-    const status = resData.status || resData.upload_status;
-    const videoSig =
-      resData.video_signature ||
-      resData.signature ||
-      resData.media_signature ||
-      resData.media_id;
+    const raw = res.data?.resource_response?.data;
+    console.log(`⏳ Transcode Poll #${attempt} Raw Data:`, JSON.stringify(raw));
 
-    console.log(
-      `⏳ Transcode Poll #\({attempt}: status = "\){status || "processing"}", signature = ${videoSig || "pending"}`
-    );
+    if (raw) {
+      const sig =
+        raw.video_signature ||
+        raw.media_signature ||
+        raw.signature ||
+        raw.video_id;
+      const status = raw.status || raw.upload_status;
 
-    if (videoSig && status === "succeeded") {
-      return videoSig;
-    }
-
-    if (status === "failed") {
-      throw new Error("Pinterest video transcode failed on backend!");
+      if (sig) return sig;
+      if (status === "succeeded" && raw.id) return raw.id;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
-  throw new Error("Video transcode timed out waiting for valid video_signature.");
+  console.log("⚠️ Transcode signature auto-detect nahi hua, direct container payload try karenge...");
+  return null;
 }
 
 async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
+  const clipObj = {
+    clip_type: 1,
+    end_time_ms: -1,
+    is_converted_from_image: false,
+    source_media_width: 720,
+    source_media_height: 1280,
+    start_time_ms: -1
+  };
+
+  const blockObj = {
+    block_style: {
+      height: 100,
+      width: 100,
+      x_coord: 0,
+      y_coord: 0
+    },
+    tracking_id: uploadId,
+    type: 3
+  };
+
+  if (videoSignature) {
+    blockObj.video_signature = String(videoSignature);
+  }
+
   const storyPinStructure = {
     metadata: {
       pin_title: row.caption,
@@ -182,33 +211,10 @@ async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
     },
     pages: [
       {
-        blocks: [
-          {
-            block_style: {
-              height: 100,
-              width: 100,
-              x_coord: 0,
-              y_coord: 0
-            },
-            tracking_id: uploadId,
-            type: 3,
-            video_signature: String(videoSignature)
-          }
-        ],
-        clips: [
-          {
-            clip_type: 1,
-            end_time_ms: -1,
-            is_converted_from_image: false,
-            source_media_width: 720,
-            source_media_height: 1280,
-            start_time_ms: -1
-          }
-        ],
+        blocks: [blockObj],
+        clips: [clipObj],
         layout: 0,
-        style: {
-          background_color: "#FFFFFF"
-        }
+        style: { background_color: "#FFFFFF" }
       }
     ]
   };
@@ -313,27 +319,29 @@ async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
       return;
     }
 
-    console.log(`🎯 Found Pending Task (Row \({row.index + 1}): "\){row.caption}"`);
+    console.log(`🎯 Found Pending Task (Row ${row.index + 1}): "${row.caption}"`);
     console.log("⬇️ Downloading MP4...");
     await downloadFile(row.url, "video.mp4");
+
+    const stat = fs.statSync("video.mp4");
+    console.log(`📦 Video file downloaded successfully: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
 
     console.log("📡 Step 1: Registering media with Pinterest...");
     const uploadData = await registerMediaUpload(headers);
     console.log(`✅ Upload registered! Upload ID: ${uploadData.upload_id}`);
 
-    console.log("☁️ Step 2: Uploading video directly to AWS S3...");
+    console.log("☁️ Step 2: Uploading complete video Buffer to AWS S3...");
     await uploadVideoToS3(uploadData, "video.mp4");
-    console.log("✅ File streamed to S3 successfully!");
+    console.log("✅ File written to S3 successfully!");
 
     console.log("⏳ Step 2.5: Waiting for transcode completion & real video signature...");
     const videoSig = await waitForVideoSignature(uploadData.upload_id, headers);
-    console.log(`✅ Transcode complete! Valid video_signature: ${videoSig}`);
 
     console.log("🚀 Step 3: Publishing Pin to Board...");
     let published = false;
 
     for (const board of availableBoards) {
-      console.log(`➡️ Trying board "\({board.name}" (ID:\){board.id})...`);
+      console.log(`➡️ Trying board "${board.name}" (ID: ${board.id})...`);
       const publishRes = await createStoryPin(
         row,
         uploadData.upload_id,
