@@ -10,7 +10,9 @@ const SHEET_CSV_URL =
 const DONE_WEBAPP =
   "https://script.google.com/macros/s/AKfycbzoGS8mMJDO_ghnUltSPIIQNhpFHn-y6zpamAATFjuMHTgTkV3ESnEtXQ7W_3D05JwJJw/exec";
 
+// Official account Board ID
 const DEFAULT_BOARD_ID = "1112952195354492699";
+const BASE_HOST = "https://in.pinterest.com";
 
 function getAuthFromState() {
   const stateRaw = fs.readFileSync("state.json", "utf-8");
@@ -23,16 +25,8 @@ function getAuthFromState() {
     throw new Error("state.json me csrftoken nahi mila!");
   }
 
-  // Duplicate cookies hatake clean single cookie string
-  const cookieMap = {};
-  state.cookies.forEach((c) => {
-    if (c.name && c.value) {
-      cookieMap[c.name] = c.value;
-    }
-  });
-
-  const cookieStr = Object.entries(cookieMap)
-    .map(([k, v]) => `\({k}=\){v}`)
+  const cookieStr = state.cookies
+    .map((c) => `\({c.name}=\){c.value}`)
     .join("; ");
 
   return { cookieStr, csrfToken };
@@ -70,14 +64,14 @@ async function registerMediaUpload(headers) {
     })
   });
 
-  // Both www and country endpoints fallbacks
-  const targetUrl = "https://www.pinterest.com/resource/ApiResource/create/";
-
-  const res = await axios.post(targetUrl, payload.toString(), {
-    headers,
-    maxRedirects: 5,
-    validateStatus: () => true // Allow handling custom Pinterest error codes
-  });
+  const res = await axios.post(
+    `${BASE_HOST}/resource/ApiResource/create/`,
+    payload.toString(),
+    {
+      headers,
+      validateStatus: () => true
+    }
+  );
 
   if (res.data?.resource_response?.error) {
     throw new Error(JSON.stringify(res.data.resource_response.error));
@@ -177,17 +171,24 @@ async function createStoryPin(row, uploadId, headers) {
   });
 
   const res = await axios.post(
-    "https://www.pinterest.com/resource/ApiResource/create/",
+    `${BASE_HOST}/resource/ApiResource/create/`,
     payload.toString(),
-    { headers }
+    {
+      headers,
+      validateStatus: () => true
+    }
   );
+
+  if (res.data?.resource_response?.error) {
+    throw new Error(JSON.stringify(res.data.resource_response.error));
+  }
 
   return res.data;
 }
 
 (async () => {
   try {
-    console.log("🔑 Reading session credentials from state.json...");
+    console.log("🔑 Reading fresh session credentials from state.json...");
     const { cookieStr, csrfToken } = getAuthFromState();
 
     const headers = {
@@ -197,8 +198,8 @@ async function createStoryPin(row, uploadId, headers) {
       "x-requested-with": "XMLHttpRequest",
       "x-pinterest-appstate": "active",
       "cookie": cookieStr,
-      "origin": "https://www.pinterest.com",
-      "referer": "https://www.pinterest.com/pin-creation-tool/",
+      "origin": "https://in.pinterest.com",
+      "referer": "https://in.pinterest.com/pin-creation-tool/",
       "user-agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     };
@@ -263,7 +264,7 @@ async function createStoryPin(row, uploadId, headers) {
 
     if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
   } catch (err) {
-    console.error("❌ Process Failed:", err.response?.data || err.message);
+    console.error("❌ Process Failed:", err.message);
     if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
     process.exit(1);
   }
