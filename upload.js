@@ -120,6 +120,7 @@ async function uploadVideoToS3(uploadData, filePath) {
   const form = new FormData();
   const params = uploadData.upload_parameters;
 
+  // AWS S3 parameters priority
   for (const [key, value] of Object.entries(params)) {
     form.append(key, value);
   }
@@ -143,39 +144,79 @@ async function uploadVideoToS3(uploadData, filePath) {
   }
 }
 
-// Quick check: Agar 10-12 second me status aaye toh thik, warna proceed
-async function checkMediaStatus(uploadId, headers) {
-  for (let i = 1; i <= 4; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    try {
-      const payload = new URLSearchParams({
-        source_url: "/pin-creation-tool/",
-        data: JSON.stringify({
-          options: { upload_id: String(uploadId) },
-          context: {}
-        })
-      });
-      const res = await axios.post(
-        `${BASE_HOST}/resource/MediaUploadStatusResource/get/`,
-        payload.toString(),
-        { headers, validateStatus: () => true }
-      );
-      const data = res.data?.resource_response?.data;
-      if (data?.video_signature) return data.video_signature;
-      if (data?.status === "succeeded" && data?.media_id) return data.media_id;
-    } catch (e) {}
+async function waitForRealTranscode(uploadId, headers) {
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    const payload = new URLSearchParams({
+      source_url: "/pin-creation-tool/",
+      data: JSON.stringify({
+        options: {
+          upload_id: String(uploadId)
+        },
+        context: {}
+      })
+    });
+
+    const res = await axios.post(
+      `${BASE_HOST}/resource/MediaUploadStatusResource/get/`,
+      payload.toString(),
+      { headers, validateStatus: () => true }
+    );
+
+    const raw = res.data?.resource_response?.data;
+    const status = raw?.status || raw?.upload_status;
+    const sig = raw?.video_signature || raw?.signature || raw?.media_signature;
+
+    if (sig) {
+      return {
+        videoSignature: sig,
+        imageSignature: raw?.image_signature || ""
+      };
+    }
+
+    if (status === "succeeded" && raw?.media_id) {
+      return {
+        videoSignature: raw.media_id,
+        imageSignature: raw?.image_signature || ""
+      };
+    }
+
+    await new Promise((r) => setTimeout(r, 2000));
   }
   return null;
 }
 
-// Method 1: StoryPin POST
-async function createStoryPin(row, uploadData, videoSig, boardId, headers) {
-  const s3Key = uploadData.upload_parameters?.key || "";
-  const sig = videoSig || s3Key.split("/").pop()?.replace(/\.[^/.]+$/, "") || String(uploadData.upload_id);
+// Robust Pin creation via PinResource with media_upload_id
+async function createPinWithMediaUpload(row, uploadId, boardId, headers) {
+  const payload = new URLSearchParams({
+    source_url: "/pin-creation-tool/",
+    data: JSON.stringify({
+      options: {
+        board_id: String(boardId),
+        description: row.caption,
+        link: row.link,
+        title: row.caption.substring(0, 100),
+        media_upload_id: String(uploadId),
+        origin: "PIN_CREATION_TOOL",
+        publish_as_story_pin: false
+      },
+      context: {}
+    })
+  });
 
+  const res = await axios.post(
+    `${BASE_HOST}/resource/PinResource/create/`,
+    payload.toString(),
+    { headers, validateStatus: () => true }
+  );
+
+  return res.data;
+}
+
+// StoryPin creation fallback
+async function createStoryPin(row, uploadId, videoSig, boardId, headers) {
   const storyPinStructure = {
     metadata: {
-      pin_title: row.caption,
+      pin_title: row.caption.substring(0, 100),
       canvas_aspect_ratio: 0.75
     },
     pages: [
@@ -183,9 +224,9 @@ async function createStoryPin(row, uploadData, videoSig, boardId, headers) {
         blocks: [
           {
             block_style: { height: 100, width: 100, x_coord: 0, y_coord: 0 },
-            tracking_id: uploadData.upload_id,
+            tracking_id: String(uploadId),
             type: 3,
-            video_signature: sig
+            video_signature: String(videoSig)
           }
         ],
         clips: [
@@ -236,35 +277,9 @@ async function createStoryPin(row, uploadData, videoSig, boardId, headers) {
   return res.data;
 }
 
-// Method 2: Standard Direct Video Pin POST (Fail-safe)
-async function createDirectVideoPin(row, uploadId, boardId, headers) {
-  const payload = new URLSearchParams({
-    source_url: "/pin-creation-tool/",
-    data: JSON.stringify({
-      options: {
-        board_id: String(boardId),
-        title: row.caption,
-        description: row.caption,
-        link: row.link,
-        media_upload_id: String(uploadId),
-        publish_as_story_pin: true
-      },
-      context: {}
-    })
-  });
-
-  const res = await axios.post(
-    `${BASE_HOST}/resource/PinResource/create/`,
-    payload.toString(),
-    { headers, validateStatus: () => true }
-  );
-
-  return res.data;
-}
-
 (async () => {
   try {
-    console.log("🔑 Reading credentials...");
+    console.log("🔑 Reading session credentials from state.json...");
     const { cookieStr, csrfToken } = getAuthFromState();
 
     const headers = {
@@ -289,11 +304,13 @@ async function createDirectVideoPin(row, uploadId, boardId, headers) {
       "x-requested-with": "XMLHttpRequest"
     };
 
-    console.log("🔍 Fetching boards...");
+    console.log("🔍 Fetching boards directly from Pinterest...");
     const availableBoards = await fetchUserBoards(headers);
+    console.log(`📋 Found ${availableBoards.length} boards.`);
 
-    console.log("📊 Reading Google Sheet...");
+    console.log("📊 Fetching Google Sheet Data...");
     const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
+
     const lines = sheetRaw.trim().split("\n");
     let chosenRow = null;
 
@@ -326,24 +343,24 @@ async function createDirectVideoPin(row, uploadId, boardId, headers) {
     }
 
     if (!chosenRow) {
-      console.log("ℹ️ No pending tasks with downloadable videos.");
+      console.log("ℹ️ No pending tasks with downloadable videos found.");
       return;
     }
 
-    console.log(`🎯 Active Task: "${chosenRow.caption}"`);
+    console.log(`🎯 Active Task (Row ${chosenRow.index + 1}): "${chosenRow.caption}"`);
 
-    console.log("📡 Registering upload...");
+    console.log("📡 Step 1: Registering media with Pinterest...");
     const uploadData = await registerMediaUpload(headers);
-    console.log(`✅ Upload ID: ${uploadData.upload_id}`);
+    console.log(`✅ Upload registered! Upload ID: ${uploadData.upload_id}`);
 
-    console.log("☁️ Uploading to S3...");
+    console.log("☁️ Step 2: Uploading video directly to AWS S3...");
     await uploadVideoToS3(uploadData, "video.mp4");
-    console.log("✅ Uploaded to S3!");
+    console.log("✅ File streamed to S3 successfully!");
 
-    console.log("⏳ Waiting 12 seconds for transcode initialization...");
-    const videoSig = await checkMediaStatus(uploadData.upload_id, headers);
+    console.log("⏳ Step 2.5: Checking transcode signature...");
+    const transcodeRes = await waitForRealTranscode(uploadData.upload_id, headers);
 
-    console.log("🚀 Publishing pin...");
+    console.log("🚀 Step 3: Publishing Pin across boards...");
     let published = false;
 
     // Prioritize trendy board
@@ -356,44 +373,47 @@ async function createDirectVideoPin(row, uploadId, boardId, headers) {
     }
 
     for (const board of availableBoards) {
-      console.log(`➡️ Attempting Board: "${board.name}"...`);
+      console.log(`➡️ Trying Board: "${board.name}" (ID: ${board.id})...`);
 
-      // Try Method 1: StoryPin
-      let res = await createStoryPin(
-        chosenRow,
-        uploadData,
-        videoSig,
-        board.id,
-        headers
-      );
-
-      if (res?.resource_response?.data) {
-        console.log("🎉 SUCCESS via StoryPin API on:", board.name);
-        published = true;
-        break;
-      }
-
-      console.log(`⚠️ StoryPin attempt error: ${res?.resource_response?.error?.message || "fallback to Direct Video Pin"}`);
-
-      // Try Method 2: Direct Video Pin
-      res = await createDirectVideoPin(
+      // 1. First try: PinResource with media_upload_id
+      let pinRes = await createPinWithMediaUpload(
         chosenRow,
         uploadData.upload_id,
         board.id,
         headers
       );
 
-      if (res?.resource_response?.data) {
-        console.log("🎉 SUCCESS via Direct Pin API on:", board.name);
+      if (pinRes?.resource_response?.data?.id) {
+        console.log("🎉 SUCCESS! Video Pin published to:", board.name);
+        console.log("Pin ID:", pinRes.resource_response.data.id);
         published = true;
         break;
       }
 
-      console.log(`⚠️ Direct Pin attempt error: ${res?.resource_response?.error?.message || "trying next board"}`);
+      console.log(`⚠️ PinResource message: ${pinRes?.resource_response?.error?.message || "trying StoryPin format"}`);
+
+      // 2. Second try: StoryPin if video signature exists
+      if (transcodeRes?.videoSignature) {
+        let storyRes = await createStoryPin(
+          chosenRow,
+          uploadData.upload_id,
+          transcodeRes.videoSignature,
+          board.id,
+          headers
+        );
+
+        if (storyRes?.resource_response?.data) {
+          console.log("🎉 SUCCESS! Story Pin published to:", board.name);
+          published = true;
+          break;
+        }
+
+        console.log(`⚠️ StoryPin message: ${storyRes?.resource_response?.error?.message || "failed"}`);
+      }
     }
 
     if (!published) {
-      throw new Error("Dono methods se pin publish nahi ho paya.");
+      throw new Error("Pin publish nahi ho paya.");
     }
 
     console.log("📝 Updating sheet status...");
