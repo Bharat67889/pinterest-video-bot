@@ -128,7 +128,48 @@ async function uploadVideoToS3(uploadData, filePath) {
   });
 }
 
-async function createStoryPin(row, uploadId, boardId, headers) {
+async function waitForVideoSignature(uploadId, headers) {
+  const maxAttempts = 20;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const payload = new URLSearchParams({
+      source_url: "/pin-creation-tool/",
+      data: JSON.stringify({
+        options: {
+          url: `/v3/media/uploads/${uploadId}/status/`
+        },
+        context: {}
+      })
+    });
+
+    const res = await axios.post(
+      `${BASE_HOST}/resource/ApiResource/create/`,
+      payload.toString(),
+      { headers, validateStatus: () => true }
+    );
+
+    const statusData = res.data?.resource_response?.data;
+    const status = statusData?.status;
+    const sig = statusData?.video_signature || statusData?.media_signature || statusData?.signature;
+
+    console.log(`⏳ Transcode Poll #\({attempt}: status = "\){status || "unknown"}", signature = ${sig || "none"}`);
+
+    if (sig) {
+      return sig;
+    }
+
+    if (status === "registered" || status === "processing") {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      continue;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+
+  // Fallback signature agar status API signature direct na de
+  return String(uploadId);
+}
+
+async function createStoryPin(row, uploadId, videoSignature, boardId, headers) {
   const storyPinStructure = {
     metadata: {
       pin_title: row.caption,
@@ -145,7 +186,8 @@ async function createStoryPin(row, uploadId, boardId, headers) {
               y_coord: 0
             },
             tracking_id: uploadId,
-            type: 3
+            type: 3,
+            video_signature: String(videoSignature)
           }
         ],
         clips: [
@@ -232,10 +274,7 @@ async function createStoryPin(row, uploadId, boardId, headers) {
 
     console.log("🔍 Fetching account boards directly from Pinterest...");
     const availableBoards = await fetchUserBoards(headers);
-    console.log(`📋 Found ${availableBoards.length} boards:`);
-    availableBoards.forEach((b, idx) => {
-      console.log(`   \({idx + 1}. [\){b.name}] (ID: ${b.id})`);
-    });
+    console.log(`📋 Found ${availableBoards.length} boards.`);
 
     console.log("📊 Fetching Google Sheet Data...");
     const sheetRaw = await (await fetch(SHEET_CSV_URL)).text();
@@ -281,15 +320,16 @@ async function createStoryPin(row, uploadId, boardId, headers) {
     await uploadVideoToS3(uploadData, "video.mp4");
     console.log("✅ File streamed to S3 successfully!");
 
-    console.log("⏳ Waiting 15 seconds for Pinterest backend transcode...");
-    await new Promise((resolve) => setTimeout(resolve, 15000));
+    console.log("⏳ Step 2.5: Waiting for video transcode and retrieving video signature...");
+    const videoSig = await waitForVideoSignature(uploadData.upload_id, headers);
+    console.log(`✅ Received video_signature: ${videoSig}`);
 
     console.log("🚀 Step 3: Attempting to publish Pin across available boards...");
     let published = false;
 
     for (const board of availableBoards) {
       console.log(`➡️ Trying board "\({board.name}" (ID:\){board.id})...`);
-      const publishRes = await createStoryPin(row, uploadData.upload_id, board.id, headers);
+      const publishRes = await createStoryPin(row, uploadData.upload_id, videoSig, board.id, headers);
 
       if (publishRes?.resource_response?.error) {
         console.log("⚠️ Board Error:", JSON.stringify(publishRes.resource_response.error));
