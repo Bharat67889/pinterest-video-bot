@@ -120,6 +120,8 @@ async function createStoryPin(row, uploadId, headers) {
             clip_type: 1,
             end_time_ms: -1,
             is_converted_from_image: false,
+            source_media_width: 720,
+            source_media_height: 1280,
             start_time_ms: -1
           }
         ],
