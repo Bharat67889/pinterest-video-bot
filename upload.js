@@ -1,5 +1,4 @@
 const fs = require("fs");
-const crypto = require("crypto");
 const axios = require("axios");
 const FormData = require("form-data");
 
@@ -82,7 +81,6 @@ async function fetchUserBoards(headers) {
 }
 
 async function registerMediaUpload(headers) {
-  const clientUUID = crypto.randomUUID();
   const payload = new URLSearchParams({
     source_url: "/pin-creation-tool/",
     data: JSON.stringify({
@@ -90,7 +88,7 @@ async function registerMediaUpload(headers) {
         url: "/v3/media/uploads/register/batch/",
         data: {
           media_info_list: JSON.stringify([
-            { id: clientUUID, media_type: "video-story-pin" }
+            { id: "media_video", media_type: "video-story-pin" }
           ])
         }
       },
@@ -109,11 +107,11 @@ async function registerMediaUpload(headers) {
   }
 
   const dataMap = res.data?.resource_response?.data;
-  if (!dataMap || !dataMap[clientUUID]) {
+  if (!dataMap || !dataMap["media_video"]) {
     throw new Error("Failed to register media: " + JSON.stringify(res.data));
   }
 
-  return dataMap[clientUUID];
+  return dataMap["media_video"];
 }
 
 async function uploadVideoToS3(uploadData, filePath) {
@@ -124,26 +122,29 @@ async function uploadVideoToS3(uploadData, filePath) {
     form.append(key, value);
   }
 
-  const fileBuffer = fs.readFileSync(filePath);
-  form.append("file", fileBuffer, {
+  const stat = fs.statSync(filePath);
+  form.append("file", fs.createReadStream(filePath), {
     filename: "video.mp4",
-    contentType: "video/mp4"
+    contentType: "video/mp4",
+    knownLength: stat.size
   });
 
   const s3Res = await axios.post(uploadData.upload_url, form, {
-    headers: { ...form.getHeaders() },
+    headers: {
+      ...form.getHeaders()
+    },
     maxBodyLength: Infinity,
     maxContentLength: Infinity,
     validateStatus: () => true
   });
 
   if (s3Res.status >= 400) {
-    throw new Error(`S3 Upload failed with status ${s3Res.status}: ${s3Res.data}`);
+    throw new Error(`S3 Upload failed with status ${s3Res.status}`);
   }
 }
 
 async function waitForVideoSignature(uploadId, headers) {
-  const maxAttempts = 15;
+  const maxAttempts = 45; // 45 * 3 sec = up to 2.2 minutes
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const payload = new URLSearchParams({
       source_url: "/pin-creation-tool/",
@@ -180,23 +181,24 @@ async function waitForVideoSignature(uploadId, headers) {
       };
     }
 
-    if (status === "succeeded" && (raw?.media_id || raw?.id)) {
-      return {
-        videoSignature: raw.media_id || raw.id,
-        imageSignature: raw?.image_signature || ""
-      };
+    if (status === "succeeded") {
+      const fallbackSig = raw?.media_id || raw?.id;
+      if (fallbackSig) {
+        return {
+          videoSignature: fallbackSig,
+          imageSignature: raw?.image_signature || ""
+        };
+      }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 4000));
+    if (status === "failed") {
+      throw new Error("Transcode failed on Pinterest server.");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
-  // Fallback: Pinterest internal md5 generation for media uploads
-  const generatedSignature = crypto.createHash("md5").update(String(uploadId)).digest("hex");
-  console.log(`ℹ️ Falling back to derived video signature: ${generatedSignature}`);
-  return {
-    videoSignature: generatedSignature,
-    imageSignature: ""
-  };
+  throw new Error("Transcode timed out waiting for signature.");
 }
 
 async function createStoryPin(row, uploadId, signatures, boardId, headers) {
@@ -363,7 +365,7 @@ async function createStoryPin(row, uploadId, signatures, boardId, headers) {
 
     console.log("⏳ Step 2.5: Polling MediaUploadStatusResource for video signature...");
     const signatures = await waitForVideoSignature(uploadData.upload_id, headers);
-    console.log(`✅ Signature assigned: ${signatures.videoSignature}`);
+    console.log(`✅ Transcode complete! Signature: ${signatures.videoSignature}`);
 
     console.log("🚀 Step 3: Publishing Pin across boards...");
     let published = false;
@@ -399,8 +401,6 @@ async function createStoryPin(row, uploadId, signatures, boardId, headers) {
         console.log("Data:", JSON.stringify(publishRes.resource_response.data));
         published = true;
         break;
-      } else {
-        console.log("⚠️ Raw response:", JSON.stringify(publishRes));
       }
     }
 
