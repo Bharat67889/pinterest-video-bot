@@ -21,24 +21,45 @@ function getAuthFromState() {
   };
 }
 
-async function downloadFile(url, destPath) {
-  const writer = fs.createWriteStream(destPath);
-  const response = await axios({
-    url,
-    method: "GET",
-    responseType: "stream",
-    maxRedirects: 10,
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+// Strict 4s timeout aur forced stream destruction
+function downloadFile(url, destPath) {
+  return new Promise(async (resolve, reject) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const writer = fs.createWriteStream(destPath);
+
+    try {
+      const response = await axios({
+        url,
+        method: "GET",
+        responseType: "stream",
+        maxRedirects: 5,
+        signal: controller.signal,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+      });
+
+      response.data.pipe(writer);
+
+      writer.on("finish", () => {
+        clearTimeout(timeoutId);
+        writer.close(resolve);
+      });
+
+      writer.on("error", (err) => {
+        clearTimeout(timeoutId);
+        writer.destroy();
+        fs.unlink(destPath, () => {});
+        reject(err);
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      writer.destroy();
+      fs.unlink(destPath, () => {});
+      reject(err);
     }
-  });
-
-  response.data.pipe(writer);
-
-  return new Promise((resolve, reject) => {
-    writer.on("finish", resolve);
-    writer.on("error", reject);
   });
 }
 
@@ -143,11 +164,32 @@ async function uploadVideoToS3(uploadData, filePath) {
   }
 }
 
-// Direct video pin create with Cloudinary thumbnail cover
-async function createPinWithCover(row, uploadId, boardId, headers) {
-  // Cloudinary URL se auto .jpg cover derive
-  const coverUrl = row.url.replace(/\.mp4(\?.*)?$/i, ".jpg");
+async function getWorkingCoverUrl(videoUrl) {
+  let candidate1 = videoUrl.replace(/\.mp4(\?.*)?$/i, ".jpg");
+  let candidate2 = videoUrl
+    .replace("/video/upload/", "/video/upload/so_0/")
+    .replace(/\.mp4(\?.*)?$/i, ".jpg");
 
+  try {
+    const res1 = await axios.head(candidate1, {
+      timeout: 3000,
+      validateStatus: () => true
+    });
+    if (res1.status === 200) return candidate1;
+  } catch (e) {}
+
+  try {
+    const res2 = await axios.head(candidate2, {
+      timeout: 3000,
+      validateStatus: () => true
+    });
+    if (res2.status === 200) return candidate2;
+  } catch (e) {}
+
+  return "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=720&q=80";
+}
+
+async function createPinWithCover(row, uploadId, boardId, coverUrl, headers) {
   const payload = new URLSearchParams({
     source_url: "/pin-creation-tool/",
     data: JSON.stringify({
@@ -223,27 +265,29 @@ async function createPinWithCover(row, uploadId, boardId, headers) {
       if (url.startsWith("http") && status === "PENDING") {
         try {
           if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
-          console.log(`⬇️ Downloading task from Row ${i + 1}...`);
+          process.stdout.write(`⬇️ Testing Row ${i + 1}... `);
           await downloadFile(url, "video.mp4");
 
           const stat = fs.statSync("video.mp4");
           if (stat.size > 10000) {
-            console.log(`📦 Video ready: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
+            console.log(`✅ Ready: ${(stat.size / (1024 * 1024)).toFixed(2)} MB`);
             chosenRow = { url, caption, link, index: i };
             break;
+          } else {
+            console.log("Empty, skipping.");
           }
         } catch (e) {
-          console.log(`⚠️ Row \({i + 1} skip:\){e.message}`);
+          console.log("Skip (dead/timeout).");
         }
       }
     }
 
     if (!chosenRow) {
-      console.log("ℹ️ No pending tasks with downloadable videos found.");
-      return;
+      console.log("ℹ️ No pending tasks with downloadable videos found. Exiting immediately.");
+      process.exit(0);
     }
 
-    console.log(`🎯 Active Task (Row \({chosenRow.index + 1}): "\){chosenRow.caption}"`);
+    console.log(`🎯 Active Task (Row ${chosenRow.index + 1}): "${chosenRow.caption}"`);
 
     console.log("📡 Step 1: Registering media with Pinterest...");
     const uploadData = await registerMediaUpload(headers);
@@ -253,10 +297,14 @@ async function createPinWithCover(row, uploadId, boardId, headers) {
     await uploadVideoToS3(uploadData, "video.mp4");
     console.log("✅ File streamed to S3 successfully!");
 
-    console.log("⏳ Waiting 8 seconds for S3 sync...");
-    await new Promise((r) => setTimeout(r, 8000));
+    console.log("⏳ Waiting 5 minutes (300s) for Cloudinary poster + Pinterest backend ingestion...");
+    await new Promise((r) => setTimeout(r, 300000));
 
-    console.log("🚀 Step 3: Publishing Pin with auto-generated cover...");
+    console.log("🖼️ Resolving validated cover image URL...");
+    const coverUrl = await getWorkingCoverUrl(chosenRow.url);
+    console.log(`✅ Using Cover URL: ${coverUrl}`);
+
+    console.log("🚀 Step 3: Publishing Pin across boards...");
     let published = false;
 
     const trendyIdx = availableBoards.findIndex((b) =>
@@ -268,12 +316,13 @@ async function createPinWithCover(row, uploadId, boardId, headers) {
     }
 
     for (const board of availableBoards) {
-      console.log(`➡️ Trying Board: "\({board.name}" (ID:\){board.id})...`);
+      console.log(`➡️ Trying Board: "${board.name}" (ID: ${board.id})...`);
 
       const pinRes = await createPinWithCover(
         chosenRow,
         uploadData.upload_id,
         board.id,
+        coverUrl,
         headers
       );
 
@@ -285,7 +334,7 @@ async function createPinWithCover(row, uploadId, boardId, headers) {
       }
 
       console.log(
-        "⚠️ Pin Response:",
+        "⚠️ Pin Response Error:",
         JSON.stringify(pinRes?.resource_response?.error || pinRes)
       );
     }
@@ -299,6 +348,7 @@ async function createPinWithCover(row, uploadId, boardId, headers) {
     console.log("✅ Task Marked as DONE!");
 
     if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
+    process.exit(0);
   } catch (err) {
     console.error("❌ Process Failed:", err.message);
     if (fs.existsSync("video.mp4")) fs.unlinkSync("video.mp4");
