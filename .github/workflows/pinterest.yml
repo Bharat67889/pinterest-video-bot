@@ -16,4 +16,4 @@ jobs:
 
       - run: npm install
 
-      - run: node update-links.js
+      - run: node upload.js
