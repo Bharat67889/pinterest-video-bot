@@ -1,11 +1,8 @@
 const fs = require("fs");
 const axios = require("axios");
 
-// 👇 Apna naya link yahan enter karo
-const NEW_TARGET_LINK = "https://example.com/your-new-link";
-
-// 👇 Testing ke liye limit 10 rakhi hai
-const PINS_LIMIT = 10;
+// 👇 Naya target link
+const NEW_TARGET_LINK = "https://t.me/+F4xykxGxaDRhYTE1";
 
 const BASE_HOST = "https://in.pinterest.com";
 
@@ -40,34 +37,62 @@ async function getMyUsername(headers) {
   return username;
 }
 
-async function getLatestPins(username, count, headers) {
-  const payload = new URLSearchParams({
-    source_url: `/${username}/pins/`,
-    data: JSON.stringify({
-      options: {
-        username: username,
-        page_size: count
-      },
-      context: {}
-    })
-  });
+// Saare pins fetch karega via Pinterest pagination
+async function getAllUserPins(username, headers) {
+  let allPins = [];
+  let bookmark = null;
+  let page = 1;
 
-  const res = await axios.post(
-    `${BASE_HOST}/resource/UserPinsResource/get/`,
-    payload.toString(),
-    { headers, validateStatus: () => true }
-  );
+  console.log("🔍 Scanning all published pins from profile...");
 
-  const pins = res.data?.resource_response?.data;
-  if (!Array.isArray(pins) || pins.length === 0) {
-    throw new Error("Koi pins nahi mile.");
+  while (true) {
+    const options = {
+      username: username,
+      page_size: 25
+    };
+
+    if (bookmark && bookmark !== "-end-") {
+      options.bookmarks = [bookmark];
+    }
+
+    const payload = new URLSearchParams({
+      source_url: `/${username}/pins/`,
+      data: JSON.stringify({
+        options: options,
+        context: {}
+      })
+    });
+
+    const res = await axios.post(
+      `${BASE_HOST}/resource/UserPinsResource/get/`,
+      payload.toString(),
+      { headers, validateStatus: () => true }
+    );
+
+    const pins = res.data?.resource_response?.data || [];
+    bookmark = res.data?.resource_response?.bookmark;
+
+    if (Array.isArray(pins) && pins.length > 0) {
+      for (const p of pins) {
+        allPins.push({
+          id: p.id,
+          title: p.title || p.grid_title || "No Title",
+          currentLink: p.link || "No Link"
+        });
+      }
+      console.log(`📦 Page ${page}: ${pins.length} pins fetched (Total abhi tak: ${allPins.length})`);
+    }
+
+    // Agar bookmark nahi bacha ya "-end-" aa gaya, matlab saare pins complete
+    if (!bookmark || bookmark === "-end-" || pins.length === 0) {
+      break;
+    }
+
+    page++;
+    await new Promise((r) => setTimeout(r, 1000));
   }
 
-  return pins.slice(0, count).map((p) => ({
-    id: p.id,
-    title: p.title || p.grid_title || "No Title",
-    currentLink: p.link || "No Link"
-  }));
+  return allPins;
 }
 
 async function updatePinLink(pinId, newLink, headers) {
@@ -85,7 +110,7 @@ async function updatePinLink(pinId, newLink, headers) {
   const res = await axios.post(
     `${BASE_HOST}/resource/PinResource/update/`,
     payload.toString(),
-    { headers, validateStatus: () => true }
+    { headers, timeout: 15000, validateStatus: () => true }
   );
 
   if (res.data?.resource_response?.error) {
@@ -121,39 +146,50 @@ async function updatePinLink(pinId, newLink, headers) {
       "x-requested-with": "XMLHttpRequest"
     };
 
-    console.log("👤 Fetching current Pinterest user details...");
+    console.log("👤 Fetching current Pinterest account username...");
     const username = await getMyUsername(headers);
     console.log(`✅ Logged in as: @${username}`);
 
-    console.log(`🔍 Fetching latest ${PINS_LIMIT} pins...`);
-    const pins = await getLatestPins(username, PINS_LIMIT, headers);
-    console.log(`📋 Found ${pins.length} pins to update.\n`);
+    const pins = await getAllUserPins(username, headers);
+    console.log(`\n📋 Found TOTAL ${pins.length} pins on account.`);
+    console.log(`🎯 Setting new link to: ${NEW_TARGET_LINK}\n`);
 
     let successCount = 0;
+    let skippedCount = 0;
 
     for (let i = 0; i < pins.length; i++) {
       const pin = pins[i];
+
+      // Agar link pehle se updated hai toh call skip karke time bachao
+      if (pin.currentLink === NEW_TARGET_LINK) {
+        console.log(`[${i + 1}/${pins.length}] Pin ID: ${pin.id} — Already up to date. Skipping.`);
+        skippedCount++;
+        continue;
+      }
+
       console.log(`[${i + 1}/${pins.length}] Updating Pin ID: ${pin.id}`);
-      console.log(`   Title: "${pin.title.substring(0, 40)}..."`);
+      console.log(`   Title: "${pin.title.substring(0, 35)}..."`);
       console.log(`   Old Link: ${pin.currentLink}`);
 
       try {
         await updatePinLink(pin.id, NEW_TARGET_LINK, headers);
-        console.log(`   ✅ New Link Set: ${NEW_TARGET_LINK}`);
+        console.log(`   ✅ Link Updated -> ${NEW_TARGET_LINK}`);
         successCount++;
       } catch (err) {
         console.log(`   ⚠️ Failed to update: ${err.message}`);
       }
 
-      // Safe delay between requests
+      // Pinterest rate limit se bachne ke liye safe delay
       if (i < pins.length - 1) {
-        console.log("   ⏳ Waiting 3 seconds...");
-        await new Promise((r) => setTimeout(r, 3000));
+        await new Promise((r) => setTimeout(r, 2500));
       }
       console.log("--------------------------------------------------");
     }
 
-    console.log(`\n🎉 Task Complete! ${successCount}/${pins.length} pins updated successfully.`);
+    console.log(`\n🎉 Task Complete!`);
+    console.log(`✅ Successfully Updated: ${successCount}`);
+    console.log(`⏭️ Already Matching / Skipped: ${skippedCount}`);
+    console.log(`📊 Total Processed: ${pins.length}`);
     process.exit(0);
   } catch (err) {
     console.error("❌ Process Failed:", err.message);
