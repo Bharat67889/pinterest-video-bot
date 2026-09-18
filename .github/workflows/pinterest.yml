@@ -16,4 +16,9 @@ jobs:
 
       - run: npm install
 
-      - run: node upload.js
+    
+
+
+
+# Aise change karo:
+- run: node update-links.js
